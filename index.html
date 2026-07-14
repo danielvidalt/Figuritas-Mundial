@@ -287,6 +287,12 @@
   .num-btn:hover { border-color: var(--pitch); }
   .num-btn.active { background: var(--green-check); border-color: var(--green-check); color: #fff; }
   .picker-hint { font-size: 12px; color: var(--muted); margin: 0; }
+  .picker-save-btn {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px; text-transform: uppercase;
+    background: var(--pitch); color: var(--paper); border: none; border-radius: 6px;
+    padding: 7px 16px; cursor: pointer; margin-top: 10px;
+  }
+  .picker-save-btn:hover { background: var(--pitch-dark); }
 
   .db-list { max-height: 420px; overflow-y: auto; border: 1px solid var(--paper-line); border-radius: 8px; }
   .db-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--paper-line); font-size: 12.5px; }
@@ -1322,6 +1328,9 @@ function numberGridHtml(code, activeNums, makeOnclick) {
   html += '</div>';
   return html;
 }
+function collapseButtonHtml(code, onclickCall) {
+  return code ? `<button type="button" class="picker-save-btn" onclick="${onclickCall}">✓ Guardar</button>` : '';
+}
 
 function toggleTengoNum(code, num) {
   if (!state.tengo[code]) state.tengo[code] = {};
@@ -1383,6 +1392,7 @@ function renderDbInventario() {
           <input type="number" class="qty" id="tengoPickQty" min="1" value="1" placeholder="Cant." title="Cantidad para stickers nuevos" />
         </div>
         ${numberGridHtml(pickerTengo, new Set(Object.keys(state.tengo[pickerTengo] || {}).map(Number)), n => `toggleTengoNum('${pickerTengo}',${n})`)}
+        ${collapseButtonHtml(pickerTengo, 'collapseTengoPicker()')}
       </div>
       <input class="db-filter" placeholder="Buscar (ej: ARG, Holograma, Messi)..." oninput="onTengoFilterInput(this)" value="${tengoFilter}" />
       <div class="db-list" id="tengoListContainer">${buildTengoListHtml()}</div>
@@ -1395,6 +1405,7 @@ function renderDbInventario() {
           <select class="team-select" onchange="pickerNecesito=this.value; renderDbInventario();">${teamOptionsHtml(pickerNecesito)}</select>
         </div>
         ${numberGridHtml(pickerNecesito, new Set(state.necesito[pickerNecesito] || []), n => `toggleNecesitoNum('${pickerNecesito}',${n})`)}
+        ${collapseButtonHtml(pickerNecesito, 'collapseNecesitoPicker()')}
       </div>
       <input class="db-filter" placeholder="Buscar..." oninput="onNecesitoFilterInput(this)" value="${necesitoFilter}" />
       <div class="db-list" id="necesitoListContainer">${buildNecesitoListHtml()}</div>
@@ -1530,6 +1541,7 @@ function renderDbPersonas() {
                 <input type="number" class="qty" id="havePickQty-${cid}" min="1" value="1" placeholder="Cant." />
               </div>
               ${numberGridHtml(pickerPersonHave[name], new Set(Object.keys(p.have[pickerPersonHave[name]] || {}).map(Number)), n => `togglePersonHaveNum('${escName}','${pickerPersonHave[name]}',${n})`)}
+              ${collapseButtonHtml(pickerPersonHave[name], `collapsePersonHavePicker('${escName}')`)}
             </div>
             <div class="db-list">${haveRows.length ? haveRows.map(r => `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)} ${r.qty > 1 ? `x${r.qty}` : ''}</span><button class="del" onclick="removePersonHave('${escName}','${r.code}',${r.num})">✕</button></div>`).join('') : '<div class="db-empty">Sin datos</div>'}</div>
           </div>
@@ -1540,6 +1552,7 @@ function renderDbPersonas() {
                 <select class="team-select" onchange="pickerPersonNeed['${escName}']=this.value; renderDbPersonas();">${teamOptionsHtml(pickerPersonNeed[name])}</select>
               </div>
               ${numberGridHtml(pickerPersonNeed[name], new Set(p.need[pickerPersonNeed[name]] || []), n => `togglePersonNeedNum('${escName}','${pickerPersonNeed[name]}',${n})`)}
+              ${collapseButtonHtml(pickerPersonNeed[name], `collapsePersonNeedPicker('${escName}')`)}
             </div>
             <div class="db-list">${needRows.length ? needRows.map(r => `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)}</span><button class="del" onclick="removePersonNeed('${escName}','${r.code}',${r.num})">✕</button></div>`).join('') : '<div class="db-empty">Sin datos</div>'}</div>
           </div>
@@ -1583,6 +1596,15 @@ function toggleSaleNeedNum(buyer, code, num) {
   saveDbState();
   renderAll();
 }
+
+// Los datos ya se guardan al tocar cada número; "Guardar" solo colapsa el
+// picker de vuelta al selector, para no dejar la grilla abierta todo el tiempo.
+function collapseTengoPicker() { pickerTengo = ''; renderDbInventario(); }
+function collapseNecesitoPicker() { pickerNecesito = ''; renderDbInventario(); }
+function collapsePersonHavePicker(name) { delete pickerPersonHave[name]; renderDbPersonas(); }
+function collapsePersonNeedPicker(name) { delete pickerPersonNeed[name]; renderDbPersonas(); }
+function collapseSaleNeedPicker(buyer) { delete pickerSaleNeed[buyer]; renderDbVentas(); }
+
 function removeSaleNeed(buyer, code, num) {
   const sale = state.sales.find(s => s.buyer === buyer);
   sale.need[code] = sale.need[code].filter(n => n !== num);
@@ -1631,6 +1653,7 @@ function renderDbVentas() {
             <select class="team-select" onchange="pickerSaleNeed['${escBuyer}']=this.value; renderDbVentas();">${teamOptionsHtml(pickerSaleNeed[sale.buyer])}</select>
           </div>
           ${numberGridHtml(pickerSaleNeed[sale.buyer], new Set(sale.need[pickerSaleNeed[sale.buyer]] || []), n => `toggleSaleNeedNum('${escBuyer}','${pickerSaleNeed[sale.buyer]}',${n})`)}
+          ${collapseButtonHtml(pickerSaleNeed[sale.buyer], `collapseSaleNeedPicker('${escBuyer}')`)}
         </div>
         <div class="db-list">${needRows.length ? needRows.map(r => {
           const isAlto = (sale.precioAlto || []).some(([c, n]) => c === r.code && n === r.num);
