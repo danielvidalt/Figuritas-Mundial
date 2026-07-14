@@ -21,6 +21,7 @@
     --green-check: #2f7d4f;
     --green-soft: #e1f0e5;
     --card-radius: 10px;
+    --header-h: 150px;
   }
   * { box-sizing: border-box; }
   body {
@@ -118,9 +119,12 @@
     border: 1px solid var(--paper-line);
     border-radius: var(--card-radius);
     margin-bottom: 22px;
-    overflow: hidden;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   }
+  /* overflow:hidden se reemplaza por radio en primer/último hijo: así no
+     rompe el position:sticky del encabezado de columnas dentro de la tarjeta. */
+  .person-card > *:first-child { border-top-left-radius: var(--card-radius); border-top-right-radius: var(--card-radius); }
+  .person-card > *:last-child { border-bottom-left-radius: var(--card-radius); border-bottom-right-radius: var(--card-radius); }
   .person-head {
     background: var(--pitch-dark);
     color: var(--paper);
@@ -220,7 +224,13 @@
   .sticker-label { font-size: 11.5px; color: var(--muted); margin-top: 1px; line-height: 1.25; }
   .done .sticker-code { text-decoration: line-through; color: var(--muted); }
   .arrow { text-align: center; color: var(--muted); font-size: 15px; padding-top: 2px; }
-  .trade-row-header { padding: 8px 16px 2px; border-top: none; background: transparent !important; }
+  .trade-row-header {
+    padding: 8px 16px; border-top: none;
+    position: sticky; top: var(--header-h); z-index: 20;
+    background: #fffdf7 !important;
+    border-bottom: 1px solid var(--paper-line);
+    box-shadow: 0 2px 3px rgba(0,0,0,0.04);
+  }
   .trade-row-header .col-label {
     font-family: 'Barlow Condensed', sans-serif; font-size: 10.5px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
@@ -837,6 +847,7 @@ function switchTab(tab) {
   document.getElementById('tabVentasBtn').classList.toggle('active', tab === 'ventas');
   document.getElementById('summaryBar').style.display = tab === 'trades' ? 'flex' : 'none';
   document.getElementById('footerText').style.display = tab === 'trades' ? 'block' : 'none';
+  updateHeaderHeightVar();
 }
 
 function switchDbSub(sub) {
@@ -1295,7 +1306,18 @@ function renderTrades() {
   document.getElementById('page-trades').innerHTML = sortBarHtml + `<div id="peopleList">${peopleHtml}</div>` + salesHtml;
   document.getElementById('footerText').innerHTML = 'Marca un intercambio como hecho apenas lo confirmes en persona. Si el mismo sticker tuyo está comprometido en otro trato, ese trato se bloquea automáticamente. Cada lado tiene su propio menú para cambiar de sticker, y un cuadro para sumar stickers extra cuando uno vale más que el otro. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
   initPeopleSortable();
+  updateHeaderHeightVar();
 }
+
+// El encabezado principal (header) es sticky y su altura varía según el
+// contenido (barra de resumen, wrap en pantallas angostas). Se mide en cada
+// render para que el encabezado de columnas quede pegado justo debajo, sin
+// superponerse ni dejar hueco.
+function updateHeaderHeightVar() {
+  const header = document.querySelector('header');
+  if (header) document.documentElement.style.setProperty('--header-h', header.offsetHeight + 'px');
+}
+window.addEventListener('resize', updateHeaderHeightVar);
 
 // ============================================================================
 // RENDER — BASE DE DATOS: MI INVENTARIO
