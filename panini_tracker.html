@@ -1,0 +1,1450 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panini WC26 — Tracker + Base de Datos</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+  :root {
+    --pitch: #1b4332;
+    --pitch-dark: #0f2a20;
+    --paper: #f6f1e4;
+    --paper-line: #e4dcc4;
+    --gold: #c9a227;
+    --gold-soft: #f0e2b0;
+    --ink: #1c1c1c;
+    --muted: #6b6558;
+    --red: #b3261e;
+    --red-soft: #f6dedc;
+    --green-check: #2f7d4f;
+    --green-soft: #e1f0e5;
+    --card-radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    background-image: repeating-linear-gradient(0deg, transparent, transparent 39px, var(--paper-line) 40px);
+    color: var(--ink);
+    font-family: 'Inter', sans-serif;
+    padding-bottom: 80px;
+  }
+  header {
+    background: var(--pitch);
+    background-image: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.05), transparent 40%);
+    color: var(--paper);
+    padding: 22px 20px 0;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    border-bottom: 4px solid var(--gold);
+  }
+  .eyebrow {
+    font-family: 'Barlow Condensed', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 12px;
+    color: var(--gold-soft);
+    margin: 0 0 4px;
+  }
+  h1 {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: clamp(20px, 5vw, 30px);
+    margin: 0 0 12px;
+    line-height: 1.05;
+  }
+  .summary-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; padding-bottom: 14px; }
+  .pill {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pill.warn { border-color: rgba(240,196,25,0.6); color: var(--gold-soft); }
+  .pill b { font-family: 'Archivo Black', sans-serif; font-weight: 400; }
+
+  .tabs { display: flex; gap: 4px; }
+  .tab-btn {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: rgba(246,241,228,0.6);
+    padding: 8px 14px 10px;
+    cursor: pointer;
+  }
+  .tab-btn.active { color: var(--paper); border-bottom-color: var(--gold); }
+
+  .toolbar {
+    max-width: 920px;
+    margin: 18px auto 0;
+    padding: 0 16px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .reset-btn {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: transparent;
+    border: 1px solid var(--muted);
+    color: var(--muted);
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .reset-btn:hover { border-color: var(--red); color: var(--red); }
+
+  main { max-width: 920px; margin: 14px auto 0; padding: 0 16px; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ---- tarjetas de persona / intercambio ---- */
+  .person-card {
+    background: #fffdf7;
+    border: 1px solid var(--paper-line);
+    border-radius: var(--card-radius);
+    margin-bottom: 22px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .person-head {
+    background: var(--pitch-dark);
+    color: var(--paper);
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .person-name { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 19px; }
+  .person-meta { font-size: 12px; color: var(--gold-soft); font-family: 'Barlow Condensed', sans-serif; }
+  .progress-chip {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.1);
+    padding: 4px 10px;
+    border-radius: 999px;
+  }
+
+  .meet-edit-row { flex-basis: 100%; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .meet-field { display: flex; flex-direction: column; gap: 2px; }
+  .meet-field label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gold-soft); }
+  .meet-field input {
+    font-family: 'Inter', sans-serif; font-size: 12.5px;
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25);
+    color: var(--paper); border-radius: 6px; padding: 4px 7px;
+  }
+  .meet-field input::placeholder { color: rgba(246,241,228,0.5); }
+  .meet-field input[type="date"], .meet-field input[type="time"] { color-scheme: dark; }
+  .meet-field.place input { min-width: 180px; }
+
+  .trade-row {
+    display: grid; grid-template-columns: 26px 1fr 22px 1fr;
+    align-items: start; gap: 10px; padding: 11px 16px;
+    border-top: 1px solid var(--paper-line);
+  }
+  .trade-row.special { background: var(--gold-soft); }
+  .trade-row.done { background: var(--green-soft); }
+  .trade-row.blocked { background: var(--red-soft); opacity: 0.75; }
+  .trade-row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--green-check); cursor: pointer; margin-top: 2px; }
+  .trade-row input[type=checkbox]:disabled { cursor: not-allowed; }
+  .sticker-block { min-width: 0; }
+  .sticker-code { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 16px; }
+  .sticker-label { font-size: 11.5px; color: var(--muted); margin-top: 1px; line-height: 1.25; }
+  .done .sticker-code { text-decoration: line-through; color: var(--muted); }
+  .arrow { text-align: center; color: var(--muted); font-size: 15px; padding-top: 2px; }
+  .stock-note { grid-column: 2 / 5; font-size: 11.5px; font-family: 'Barlow Condensed', sans-serif; margin-top: 2px; }
+  .stock-note.blocked-text { color: var(--red); font-weight: 600; }
+  .stock-note.low-text { color: var(--gold); font-weight: 600; }
+
+  .sale-row { grid-template-columns: 26px 1fr auto; }
+  .price-tag { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; background: var(--pitch); color: var(--paper); white-space: nowrap; }
+  .price-tag.low { background: #8a8570; }
+
+  .swap-select { margin-top: 4px; font-family: 'Inter', sans-serif; font-size: 11px; color: var(--pitch); background: #fff; border: 1px solid var(--paper-line); border-radius: 6px; padding: 3px 6px; max-width: 100%; cursor: pointer; }
+  .swap-select:disabled { opacity: 0.4; cursor: not-allowed; }
+  .swap-select.overridden { border-color: var(--gold); background: var(--gold-soft); font-weight: 600; }
+
+  .extras-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .extra-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--pitch); color: var(--paper); font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; padding: 2px 6px 2px 8px; border-radius: 999px; }
+  .extra-chip button { background: rgba(255,255,255,0.2); border: none; color: var(--paper); border-radius: 50%; width: 15px; height: 15px; font-size: 10px; line-height: 1; cursor: pointer; padding: 0; }
+  .add-extra-row { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; align-items: center; }
+  .add-extra-row select { font-family: 'Inter', sans-serif; font-size: 10.5px; border: 1px dashed var(--paper-line); border-radius: 6px; padding: 2px 4px; background: #fff; max-width: 130px; }
+  .add-extra-row button { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700; border: 1px solid var(--pitch); color: var(--pitch); background: transparent; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .add-extra-row button:hover { background: var(--pitch); color: var(--paper); }
+
+  footer { max-width: 920px; margin: 10px auto 0; padding: 0 16px; color: var(--muted); font-size: 12px; font-family: 'Barlow Condensed', sans-serif; }
+
+  /* ---- Base de Datos ---- */
+  .db-subtabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  .db-subtab-btn {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; text-transform: uppercase;
+    background: #fff; border: 1px solid var(--paper-line); color: var(--pitch);
+    border-radius: 999px; padding: 6px 14px; cursor: pointer;
+  }
+  .db-subtab-btn.active { background: var(--pitch); color: var(--paper); border-color: var(--pitch); }
+
+  .db-section { background: #fffdf7; border: 1px solid var(--paper-line); border-radius: var(--card-radius); padding: 16px; margin-bottom: 18px; }
+  .db-section h2 { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; margin: 0 0 4px; color: var(--pitch-dark); }
+  .db-section .db-sub { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+
+  .db-filter { width: 100%; padding: 7px 10px; border: 1px solid var(--paper-line); border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 13px; margin-bottom: 10px; }
+
+  .db-add-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 8px; padding: 10px; margin-bottom: 12px; }
+  .db-add-form input, .db-add-form select {
+    font-family: 'Inter', sans-serif; font-size: 13px; padding: 6px 8px; border: 1px solid var(--paper-line); border-radius: 6px;
+  }
+  .db-add-form input.code { width: 70px; text-transform: uppercase; }
+  .db-add-form input.nums { width: 140px; }
+  .db-add-form input.qty { width: 60px; }
+  .db-add-form button {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px; text-transform: uppercase;
+    background: var(--pitch); color: var(--paper); border: none; border-radius: 6px; padding: 7px 14px; cursor: pointer;
+  }
+  .db-add-form button:hover { background: var(--pitch-dark); }
+  .db-add-form .hint { font-size: 10.5px; color: var(--muted); flex-basis: 100%; }
+
+  .db-list { max-height: 420px; overflow-y: auto; border: 1px solid var(--paper-line); border-radius: 8px; }
+  .db-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--paper-line); font-size: 12.5px; }
+  .db-row:last-child { border-bottom: none; }
+  .db-row:nth-child(even) { background: #faf7ee; }
+  .db-row .code { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 14px; min-width: 70px; }
+  .db-row .label { flex: 1; color: var(--muted); min-width: 0; }
+  .db-row input.qty-input { width: 46px; padding: 3px 4px; border: 1px solid var(--paper-line); border-radius: 5px; font-size: 12px; text-align: center; }
+  .db-row button.del {
+    background: var(--red-soft); color: var(--red); border: none; border-radius: 50%;
+    width: 22px; height: 22px; font-size: 12px; cursor: pointer; flex-shrink: 0;
+  }
+  .db-row button.del:hover { background: var(--red); color: #fff; }
+  .db-empty { padding: 16px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  .person-manage-card { border: 1px solid var(--paper-line); border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
+  .person-manage-head { background: var(--paper); padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .person-manage-head .info { display: flex; flex-direction: column; gap: 2px; }
+  .person-manage-head .name { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 17px; }
+  .person-manage-head .count { font-size: 11.5px; color: var(--muted); }
+  .person-manage-actions { display: flex; gap: 6px; }
+  .person-manage-actions button {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; text-transform: uppercase;
+    border-radius: 999px; padding: 5px 12px; cursor: pointer; border: 1px solid var(--pitch); background: #fff; color: var(--pitch);
+  }
+  .person-manage-actions button.del { border-color: var(--red); color: var(--red); }
+  .person-manage-actions button.del:hover { background: var(--red); color: #fff; }
+  .person-manage-actions button.edit:hover { background: var(--pitch); color: #fff; }
+
+  .person-manage-body { padding: 14px; display: none; }
+  .person-manage-body.open { display: block; }
+  .person-fields { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .person-fields input, .person-fields textarea {
+    font-family: 'Inter', sans-serif; font-size: 13px; padding: 6px 9px; border: 1px solid var(--paper-line); border-radius: 6px; flex: 1; min-width: 150px;
+  }
+  .person-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 640px) { .person-two-col { grid-template-columns: 1fr; } }
+  .person-two-col h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; margin: 0 0 6px; color: var(--pitch-dark); }
+
+  .new-person-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 8px; padding: 10px; margin-bottom: 16px; }
+  .new-person-form input { font-family: 'Inter', sans-serif; font-size: 13px; padding: 6px 9px; border: 1px solid var(--paper-line); border-radius: 6px; flex: 1; min-width: 140px; }
+  .new-person-form button { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px; text-transform: uppercase; background: var(--gold); color: var(--pitch-dark); border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; }
+
+  @media (max-width: 480px) {
+    .trade-row { grid-template-columns: 22px 1fr 16px 1fr; padding: 10px 12px; }
+    .sticker-code { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <p class="eyebrow">Daniel · World Cup 2026</p>
+  <h1>Tracker + Base de Datos</h1>
+  <div class="tabs">
+    <button class="tab-btn active" id="tabTradesBtn" onclick="switchTab('trades')">Intercambios</button>
+    <button class="tab-btn" id="tabDbBtn" onclick="switchTab('db')">Base de Datos</button>
+  </div>
+  <div class="summary-bar" id="summaryBar"></div>
+</header>
+
+<div class="toolbar">
+  <button class="reset-btn" id="resetBtn">Reiniciar progreso</button>
+</div>
+
+<main>
+  <div class="page active" id="page-trades"></div>
+  <div class="page" id="page-db">
+    <div class="db-subtabs">
+      <button class="db-subtab-btn active" data-sub="inventario" onclick="switchDbSub('inventario')">Mi Inventario</button>
+      <button class="db-subtab-btn" data-sub="personas" onclick="switchDbSub('personas')">Personas</button>
+      <button class="db-subtab-btn" data-sub="ventas" onclick="switchDbSub('ventas')">Ventas</button>
+    </div>
+    <div id="db-inventario" class="db-sub-page"></div>
+    <div id="db-personas" class="db-sub-page" style="display:none"></div>
+    <div id="db-ventas" class="db-sub-page" style="display:none"></div>
+  </div>
+</main>
+
+<footer id="footerText"></footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+// ============================================================================
+// CONEXIÓN SUPABASE — reemplaza el almacenamiento de artifacts (window.storage)
+// por lectura/escritura real en la tabla `app_storage` (clave/valor).
+// ============================================================================
+const SUPABASE_URL = 'https://mpisrtxwvkrhohuearqi.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1waXNydHh3dmtyaG9odWVhcnFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMDQ0OTIsImV4cCI6MjA5OTU4MDQ5Mn0.Wq743S4x5fvRbpNYTgfMpYp2af45fKY5B9U0EQWFemM';
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+window.storage = {
+  async get(key) {
+    const { data, error } = await supabaseClient
+      .from('app_storage')
+      .select('value')
+      .eq('key', key)
+      .maybeSingle();
+    if (error) { console.error('storage.get', key, error); return null; }
+    return data ? { value: data.value } : null;
+  },
+  async set(key, value) {
+    const { error } = await supabaseClient
+      .from('app_storage')
+      .upsert({ key, value, updated_at: new Date().toISOString() });
+    if (error) { console.error('storage.set', key, error); throw error; }
+  },
+};
+</script>
+<script>
+const SEED ={"tengo":{"FWC_trofeo":{"1":1,"3":1,"4":1},"FWC_pergamino":{"13":1,"15":2,"18":1},"MEX":{"2":1,"3":1,"14":1,"15":1,"17":1,"19":1,"20":1},"RSA":{"9":1,"18":1,"20":1},"KOR":{"2":1,"5":1,"6":1,"8":1,"10":1},"CZE":{"4":1,"5":1,"6":2,"7":1,"10":2,"15":1,"18":1},"CAN":{"7":1,"9":1,"10":1,"12":1},"BIH":{"1":1,"4":1,"6":1,"7":2,"9":1,"13":1,"20":2},"QAT":{"2":1,"3":2,"6":1,"8":1,"13":1,"20":1},"SUI":{"4":1,"5":1,"6":1,"8":1,"13":1,"20":1},"BRA":{"2":1,"4":1,"8":2,"12":1,"16":2,"17":1,"20":1},"MAR":{"1":1,"7":1,"9":1,"11":2,"12":1,"14":1,"16":2,"20":1},"HAI":{"1":1,"2":1,"19":1,"20":1},"SCO":{"1":1,"7":1,"12":1,"14":1,"15":1,"16":1,"20":1},"USA":{"4":1,"5":1,"9":1,"15":1},"PAR":{"1":3,"9":1,"10":1,"11":1,"15":2,"18":2,"20":1},"AUS":{"6":1,"10":1,"12":3,"13":1,"14":2,"17":1,"20":2},"TUR":{"4":1,"9":1,"11":1,"13":1,"15":1,"16":1},"GER":{"1":1,"6":2,"8":1,"10":1,"11":1,"12":1,"17":2},"CUW":{"3":1,"5":1,"7":1,"12":1,"13":1,"15":1,"17":2,"20":1},"CIV":{"1":2,"3":1,"5":1,"10":1,"16":1},"ECU":{"1":1,"17":1,"18":1},"NED":{"5":1,"6":1,"8":2,"12":1,"14":1,"15":1,"18":1},"JPN":{"3":1,"4":1,"14":1,"18":1,"19":1},"SWE":{"1":1,"4":1,"5":2,"8":3,"10":1,"11":1,"13":1,"17":1,"18":1},"TUN":{"2":1,"6":1,"8":2,"10":1,"13":1,"18":2,"20":1},"BEL":{"1":2,"2":1,"3":1,"6":1,"9":2,"14":1,"15":2,"16":3,"20":1},"EGY":{"2":1,"4":1,"7":1,"11":1,"15":3,"17":1,"18":1,"19":1},"IRN":{"1":1,"2":1,"4":1,"7":1,"18":3},"NZL":{"4":2,"6":1,"17":1,"20":1},"ESP":{"2":1,"6":2,"10":1,"11":1},"CPV":{"4":1,"6":1,"7":1,"10":2,"13":1,"17":1},"KSA":{"6":1,"14":1,"17":1,"19":1,"20":1},"URU":{"1":1,"8":1,"15":1},"FRA":{"3":1,"4":1,"10":2,"16":2,"18":1,"19":1},"SEN":{"1":1,"4":1,"6":1,"13":1,"15":1},"IRQ":{"3":1,"4":1,"9":2,"11":1,"17":1},"NOR":{"6":1,"9":2,"10":1,"12":1,"13":2,"15":1,"19":1},"ARG":{"2":1,"5":2,"9":1,"15":2,"16":1,"17":1,"19":2},"ALG":{"1":2,"3":2,"7":2,"11":1,"17":1},"AUT":{"2":1,"5":1,"6":1,"7":1,"12":1,"20":1},"JOR":{"6":1,"9":1,"12":1,"13":2,"16":1},"POR":{"7":2,"8":2,"9":2,"13":2,"14":2,"20":2},"COD":{"2":1,"4":1,"6":1,"15":1,"17":1},"UZB":{"1":1,"2":1,"9":1,"10":1,"12":1,"18":1},"COL":{"7":1,"14":1,"17":1,"19":1},"ENG":{"1":2,"3":1,"6":1,"9":2,"14":1,"18":1,"19":1},"CRO":{"3":1,"9":1,"10":1,"13":1,"14":1},"GHA":{"3":2,"4":1,"10":1,"12":1,"18":1,"20":1},"PAN":{"1":1,"4":2,"5":1,"6":2,"8":1,"10":1,"15":2,"20":1}},"necesito":{"FWC_trofeo":[2],"FWC_mundo":[5,6,7],"FWC_pergamino":[12,19],"MEX":[4,5,8,10],"RSA":[5,8,13,19],"KOR":[1,9,11,14,19],"CZE":[1,9,11,14],"CAN":[3,11,14,16,19],"BIH":[2,10,15],"QAT":[5,7,10,11,15,18],"SUI":[12,14,17,19],"BRA":[1,3,11,18],"MAR":[2,10,17],"HAI":[4,7,13,16],"SCO":[6,10,13,17],"USA":[2,6,10,14,17,19],"PAR":[4,7,8,13],"AUS":[2,7,9,11,15,16],"TUR":[2,5,6,7,10,12,19,20],"GER":[9,14,16,18,20],"CUW":[1,2,4,8,14,19],"CIV":[2,6,7,8,12,18],"ECU":[2,3,7,12],"NED":[3,13,17,20],"JPN":[5,8,11,12],"SWE":[2,9,12,15],"TUN":[4,7,12,14,15,17],"BEL":[10,19],"EGY":[1,9,13,14,16,20],"IRN":[3,13,15,17,20],"NZL":[3,5,7,10,18],"ESP":[1,5,9,13,14,20],"CPV":[1,5,11,12,14],"KSA":[1,3,7,10,13],"URU":[4,5,6,9,10,12,13,14,16,17,20],"FRA":[8,9,15,17],"SEN":[7,9,10,14,20],"IRQ":[2,5,7,10,13,18],"NOR":[2,4,11,14,16],"ARG":[1,10,11,12,13,14,18],"ALG":[2,5,6,8,14,20],"AUT":[1,4,17,19],"JOR":[5,7,10,15,17,18],"POR":[1,2,4,10,11,15,17],"COD":[5,7,8,12,14,20],"UZB":[3,6,8,15,16,19],"COL":[1,2,6,8,16,20],"ENG":[7,10,15,17],"CRO":[2,7,16,20],"GHA":[2,5,11,15],"PAN":[2,7,9,11,12,16]},"people":{"Seba Muñoz":{"location":"Burwood, NSW","meetPoint":"Por definir (aún no propuesto — Burwood o alrededores, a coordinar)","notas":"No le importa si el sticker tiene borde blanco o no.","conflicto":"❌ El Messi (ARG17) ya NO está disponible para Seba — Daniel decidió priorizar la oferta de Cristy Andrade por el mismo Ronaldo (POR15), que trae 13 intercambios extra confirmados. Avísale a Seba. Los otros 4 posibles ítems (MAR2, SEN10, ALG2, GHA5) siguen en pie si quieres seguir con esos por separado, una vez sepas qué necesita él.","specialDeal":null,"have":{"MEX":{"17":1},"CZE":{"4":1,"10":1},"CAN":{"8":1},"BRA":{"15":1},"MAR":{"2":1},"AUS":{"4":1},"EGY":{"5":1},"CPV":{"18":1},"KSA":{"20":1},"SEN":{"10":1},"ALG":{"2":1,"4":1},"AUT":{"9":1},"POR":{"9":1,"15":1},"COD":{"4":1},"UZB":{"14":1},"GHA":{"5":1}},"need":{}},"Lizeth Diaz":{"location":"Suburbios del este de Sydney — puede reunirse en Central Station","meetPoint":"Central Station — HOY 6:30 PM","notas":"Tiene stickers con y sin borde — no hay problema de preferencia de parallel en ningún sentido.","conflicto":null,"specialDeal":null,"have":{"FWC":{"2":1,"16":1},"MEX":{"1":1,"5":2,"6":1,"7":1,"8":1,"9":1,"14":1,"19":1},"RSA":{"2":1,"4":1,"5":1,"7":2,"9":1,"10":2,"11":1},"KOR":{"1":1,"5":1,"12":1,"13":2,"18":1,"19":1},"CZE":{"1":2,"2":1,"4":1,"6":1,"10":1},"CAN":{"2":1,"9":1,"14":3,"19":1},"BIH":{"1":1,"5":1,"11":1,"13":1},"QAT":{"1":2,"6":1,"8":2,"14":1,"20":1},"SUI":{"2":1,"3":1,"12":1,"13":1,"18":1},"BRA":{"7":2,"9":1,"13":1},"MAR":{"19":1,"20":1},"HAI":{"7":1,"10":1,"11":1},"SCO":{"1":2,"10":1,"17":1,"20":1},"USA":{"8":1,"12":2,"19":1,"20":1},"PAR":{"1":1,"4":1,"10":1,"15":1,"18":1},"AUS":{"3":1,"7":1,"18":1},"TUR":{"1":1,"4":2,"13":1,"16":1},"GER":{"4":1,"5":1,"11":1,"15":1,"20":1},"CUW":{"17":1,"20":1},"CIV":{"11":2,"13":1,"18":1,"20":1},"ECU":{"10":1,"16":1,"17":1},"NED":{"7":1,"9":1,"13":1,"19":2},"JPN":{"1":1,"2":1,"4":1},"SWE":{"2":1,"8":1,"15":1,"16":1,"20":1},"TUN":{"3":1,"7":1,"9":1,"15":1,"17":1},"BEL":{"1":1,"5":1,"9":1,"11":2,"12":1,"16":1,"18":2},"EGY":{"5":1,"7":1,"13":1},"IRN":{"3":1,"8":1,"14":1,"16":1},"NZL":{"2":1,"10":1,"16":3,"17":1},"ESP":{"1":1,"6":1,"14":1,"16":2,"18":1,"19":2},"CPV":{"7":1,"8":1,"14":1},"KSA":{"3":1,"4":1,"6":1,"7":1,"9":1,"14":1,"15":1,"16":1},"URU":{"6":2,"9":1,"10":1,"18":1},"FRA":{"6":1,"8":1,"11":2,"19":1},"SEN":{"3":1,"9":1,"16":1,"18":2,"19":1},"IRQ":{"14":1},"NOR":{"8":1,"15":1},"ARG":{"11":2,"18":1},"ALG":{"1":1,"20":1},"AUT":{"1":1,"3":2,"16":1},"JOR":{"10":1,"15":1,"18":1},"POR":{"2":1},"COD":{"5":2,"6":1,"7":1,"11":1,"15":2,"20":1},"UZB":{"1":1},"COL":{"7":1,"8":1},"ENG":{"4":1,"20":1},"GHA":{"2":1,"20":2},"PAN":{"4":1,"8":1,"9":1}},"need":{"FWC":[7,11,13],"MEX":[2,15,16],"KOR":[6,8],"CZE":[17,18],"QAT":[3,9,13,15],"SUI":[5,7,8],"BRA":[4,10,17,18],"MAR":[11],"HAI":[20],"SCO":[14],"USA":[1,4,5,14,17],"PAR":[3],"GER":[10],"CUW":[13,18],"CIV":[5,14],"NED":[2],"SWE":[4,12],"BEL":[20],"EGY":[18],"IRN":[12],"ESP":[7],"KSA":[2,20],"URU":[12],"IRQ":[3],"NOR":[5],"ARG":[5],"ALG":[7],"AUT":[5,7,10,12],"JOR":[9,14],"UZB":[14],"COL":[10,16,18],"ENG":[7,15,17],"CRO":[13,19],"GHA":[5,8,18],"PAN":[6,19]}},"Tomas Jimenez":{"location":"Rockdale, NSW","meetPoint":"City (de noche) — ideal para ti","notas":"Ya completó el resto del álbum — SOLO le interesan tu Messi (ARG17) y tus Extra Stickers coleccionables (Mbappé, Pulisic). No necesita nada más de ti.","conflicto":"❌ SIN TRATO: Daniel decidió NO hacer ningún trato con Tomas — ni el intercambio del Messi/Ronaldo, ni la venta de los Extra Stickers (Mbappé, Pulisic). El Messi queda sólo en manos de la negociación con Seba Muñoz.","specialDeal":null,"have":{"FWC_trofeo":{"3":1},"FWC_mundo":{"5":1,"6":1},"FWC_pergamino":{"10":1,"11":1,"14":1,"15":1,"18":1},"MEX":{"1":1,"3":1,"5":1,"7":1,"16":1,"17":1,"18":1},"RSA":{"1":1,"5":1,"7":1,"9":1,"10":1,"17":1},"KOR":{"1":1,"6":1,"7":1,"8":1,"16":1,"20":1},"CZE":{"1":1,"3":1,"5":1,"17":1,"20":1},"CAN":{"4":1,"8":1,"10":1,"11":1,"16":1,"17":1,"19":1,"20":1},"BIH":{"1":1,"9":1,"14":1},"QAT":{"4":1,"8":1,"9":1,"12":1,"16":1,"17":1},"SUI":{"1":1,"2":1,"4":1,"6":1,"9":1,"12":1,"18":1},"BRA":{"1":1,"3":1,"5":1,"7":1,"8":1,"9":1,"10":1,"20":1},"MAR":{"1":1,"3":1,"7":1,"13":1,"20":1},"HAI":{"1":1,"5":1,"7":1,"9":1,"11":1,"14":1,"15":1,"17":1,"19":1,"20":1},"SCO":{"1":1,"5":1,"10":1,"12":1,"13":1,"15":1,"17":1},"USA":{"1":1,"4":1,"5":1,"8":1,"12":1,"14":1,"17":1,"19":1},"PAR":{"1":1,"4":1,"5":1,"7":1,"8":1,"11":1,"12":1,"16":1,"18":1},"AUS":{"3":1,"8":1,"9":1,"15":1,"19":1},"TUR":{"1":1,"2":1,"6":1,"8":1,"9":1,"11":1,"15":1,"16":1},"GER":{"1":1,"4":1,"5":1,"7":1,"11":1,"13":1,"14":1,"17":1},"CUW":{"1":1,"2":1,"3":1,"8":1,"10":1,"11":1,"13":1,"14":1,"16":1,"18":1,"19":1},"CIV":{"1":1,"2":1,"6":1,"7":1,"14":1,"15":1},"ECU":{"1":1,"2":1,"3":1,"4":1,"5":1,"6":1,"8":1,"12":1,"13":1,"17":1,"19":1},"NED":{"1":1,"2":1,"3":1,"4":1,"5":1,"6":1,"7":1,"13":1,"14":1,"17":1,"18":1,"19":1},"JPN":{"1":1,"5":1,"6":1,"7":1,"11":1,"13":1,"17":1,"18":1,"19":1},"SWE":{"1":1,"2":1,"4":1,"9":1,"12":1,"20":1},"TUN":{"1":1,"5":1,"6":1,"8":1,"9":1,"10":1,"15":1,"16":1,"17":1,"20":1},"BEL":{"1":1,"2":1,"5":1,"6":1,"9":1,"11":1,"13":1,"14":1,"17":1},"EGY":{"1":1,"3":1,"4":1,"5":1,"7":1,"8":1,"9":1,"10":1,"11":1,"17":1,"20":1},"IRN":{"1":1,"2":1,"5":1,"7":1,"13":1,"15":1,"18":1,"19":1},"NZL":{"2":1,"4":1,"5":1,"6":1,"7":1,"9":1,"12":1,"13":1,"15":1,"16":1,"18":1,"19":1},"ESP":{"9":1,"10":1,"13":1,"16":1,"18":1},"CPV":{"1":1,"5":1,"7":1,"10":1,"11":1,"17":1,"18":1},"KSA":{"1":1,"5":1,"6":1,"7":1,"9":1,"11":1,"14":1},"URU":{"2":1,"3":1,"5":1,"6":1,"7":1,"13":1,"15":1,"18":1,"19":1},"FRA":{"2":1,"7":1,"8":1,"9":1,"11":1,"12":1},"SEN":{"1":1,"2":1,"7":1,"9":1,"11":1,"13":1,"20":1},"IRQ":{"2":1,"6":1,"7":1,"15":1,"18":1,"19":1},"NOR":{"1":1,"3":1,"6":1,"8":1,"14":1,"15":1,"19":1},"ARG":{"2":1,"11":1},"ALG":{"4":1,"6":1,"8":1,"11":1,"13":1,"14":1,"15":1,"17":1,"18":1,"20":1},"AUT":{"1":1,"7":1,"12":1,"14":1,"16":1,"17":1,"18":1,"19":1},"JOR":{"3":1,"4":1,"7":1,"12":1,"15":1,"16":1,"19":1},"POR":{"5":1,"6":1,"9":1,"10":1,"13":1,"14":1,"19":1,"20":1},"COD":{"1":1,"3":1,"8":1,"9":1,"11":1,"13":1,"14":1,"15":1,"19":1},"UZB":{"5":1,"10":1,"13":1,"15":1,"20":1},"COL":{"2":1,"3":1,"4":1,"6":1,"8":1,"15":1,"17":1,"18":1,"20":1},"ENG":{"1":1,"4":1,"6":1,"7":1,"8":1,"9":1,"12":1,"13":1,"14":1,"16":1,"20":1},"CRO":{"1":1,"2":1,"3":1,"5":1,"8":1,"9":1,"10":1,"11":1,"13":1,"14":1,"16":1},"GHA":{"1":1,"3":1,"8":1,"11":1,"13":1,"19":1,"20":1},"PAN":{"1":1,"2":1,"4":1,"6":1,"8":1,"13":1,"14":1,"18":1,"20":1}},"need":{}},"Jean Mendieta":{"location":"Homebush, NSW","meetPoint":"Por definir","notas":"Códigos corregidos por Claude: COR→KOR, SUE→SWE, ALEMANIA→GER, Estados Unidos→USA, Nueva Zelanda→NZL, OCS→SCO (asumido, confirmar).","conflicto":null,"specialDeal":null,"have":{"KOR":{"13":1},"BIH":{"18":1},"MAR":{"5":1},"HAI":{"10":1},"SCO":{"1":1,"8":1,"20":1},"USA":{"3":1},"AUS":{"11":1},"GER":{"15":1},"CUW":{"17":1},"NED":{"15":1},"SWE":{"7":1,"10":1},"EGY":{"5":1,"8":1},"IRN":{"3":1},"NZL":{"11":1},"ALG":{"5":1},"POR":{"8":1},"COL":{"11":1},"ENG":{"18":1},"CRO":{"1":1,"3":1},"GHA":{"12":1,"14":2,"15":1},"PAN":{"4":1,"6":1,"15":1,"17":1}},"need":{"MEX":[7],"RSA":[11],"KOR":[16],"CZE":[6,19],"BIH":[5],"QAT":[3],"HAI":[14,20],"USA":[14],"AUS":[3],"TUR":[16],"CUW":[10],"CIV":[14],"NED":[3],"JPN":[15],"SWE":[13,19],"BEL":[20],"IRN":[16],"ESP":[9],"CPV":[1],"URU":[1],"IRQ":[13,20],"NOR":[17],"AUT":[13],"JOR":[4,8,18],"COD":[13,18],"UZB":[9],"COL":[3],"ENG":[7,11,19],"PAN":[2,7]}},"Wilson Luna":{"location":"Rockdale, NSW","meetPoint":"Por definir","notas":"FWC 🏆 '00' (Panini Logo) NO está catalogado en tu base de datos — se excluyó del cruce, confírmame si lo necesitas.","conflicto":null,"specialDeal":null,"have":{"FWC_mundo":{"7":1},"FWC_pergamino":{"11":1,"14":1,"16":1},"MEX":{"3":1,"17":1},"RSA":{"7":1,"9":1,"11":1,"13":1},"KOR":{"1":1,"7":1,"14":1,"18":1},"CZE":{"1":1,"3":1,"5":1,"8":1},"CAN":{"9":1},"BIH":{"1":1,"2":1,"9":1,"13":1},"QAT":{"3":1,"5":1,"7":1,"8":1,"9":1,"11":1,"12":1},"SUI":{"10":1,"14":1},"BRA":{"5":1,"9":1,"17":1},"MAR":{"2":1,"11":1,"17":1,"19":1},"HAI":{"13":1,"20":1},"SCO":{"5":1,"19":1},"USA":{"3":1,"8":1,"9":1,"11":1,"17":1},"PAR":{"1":1,"5":1,"6":1,"10":1,"17":1},"AUS":{"8":1,"19":1,"20":1},"TUR":{"2":1},"GER":{"1":1,"10":1,"12":1,"14":1,"15":1,"16":1,"20":1},"CUW":{"4":1,"5":1,"6":1},"CIV":{"2":1,"3":1,"4":1,"10":1,"16":1},"ECU":{"3":1,"4":1,"5":1,"7":1,"10":1,"14":1},"NED":{"7":1,"20":1},"JPN":{"1":1,"2":1,"3":1,"15":1},"SWE":{"7":1,"10":1,"14":1,"17":1,"20":1},"TUN":{"6":1,"13":1,"19":1},"BEL":{"7":1,"9":1},"EGY":{"9":1,"13":1,"15":1,"18":1,"20":1},"IRN":{"4":1,"11":1,"17":1},"NZL":{"2":1,"7":1,"15":1},"CPV":{"3":1,"14":1,"16":1},"KSA":{"5":1,"13":1,"14":1,"15":1,"20":1},"URU":{"4":1,"5":1,"13":1,"15":1,"16":1,"17":1},"FRA":{"2":1,"6":1,"18":1,"20":1},"SEN":{"2":1,"5":1},"IRQ":{"8":1,"15":1,"18":1},"NOR":{"2":1,"10":1,"12":1,"17":1},"ARG":{"1":1,"5":1,"7":1,"8":1,"10":1},"ALG":{"6":1,"11":1,"12":1,"13":1,"16":1,"20":1},"AUT":{"19":1,"20":1},"JOR":{"6":1,"11":1,"12":1},"POR":{"5":1,"7":1,"9":1,"11":1,"18":1,"19":1,"20":1},"COD":{"1":1,"14":1,"20":1},"UZB":{"4":1,"5":1,"11":1,"13":1,"18":1},"COL":{"1":1,"3":1,"13":1,"16":1,"18":1},"ENG":{"5":1,"6":1,"16":1},"CRO":{"1":1,"8":1,"17":1},"GHA":{"4":1,"5":1,"6":1,"12":1,"15":1,"20":1},"PAN":{"6":1,"12":1,"16":1,"18":1}},"need":{"FWC_trofeo":[1,2,3,4],"FWC_mundo":[8],"FWC_pergamino":[10,12,15,17,18,19],"MEX":[1,5,7,8,13,14,15,16,19,20],"RSA":[2,4,5,12,15,17,18,19,20],"KOR":[6,9,11,12,17,19,20],"CZE":[2,6,7,9,12,15,16,17,18,19,20],"CAN":[1,4,5,6,12,13,14,15,19],"BIH":[6,10,15,18,19,20],"QAT":[1,2,4,10,13,16,17,18,19,20],"SUI":[1,5,6,8,12,15,16,17,18,19],"BRA":[1,3,7,8,11,14,15],"MAR":[1,4,5,8,9,12,14,15,16,18],"HAI":[1,2,8,14,15,16,19],"SCO":[2,7,8,9,11,12,13,14,15,16,17,20],"USA":[1,2,4,5,6,16,18,20],"PAR":[2,3,4,7,9,11,13,18,20],"AUS":[1,4,5,7,15],"TUR":[3,7,9,10,12,13,15,18,19],"GER":[2,3,8,11,17,19],"CUW":[2,7,8,11,12,14,19],"CIV":[6,7,8,11,13,14,15,17,18,20],"ECU":[2,6,9,16,18],"NED":[2,4,11,13,14,15,17,19],"JPN":[6,7,8,9,10,11,12,13,16],"SWE":[2,3,4,5,6,8,9,13,16],"TUN":[2,4,9,11,12,14,15,20],"BEL":[8,11,13,14,15,18],"EGY":[1,2,5,11,12],"IRN":[3,5,6,8,9,15,16,18,19,20],"NZL":[4,6,8,11,12,14,16,17,19,20],"ESP":[3,4,5,7,8,10,11,12,13,18,20],"CPV":[1,4,5,8,10,12,19],"KSA":[1,2,3,6,10,12,17,18],"URU":[1,3,6,8,12,14,18,20],"FRA":[1,4,5,7,8,10,13,15,16,19],"SEN":[3,4,6,9,10,14,16,17,18],"IRQ":[2,3,4,12,16,17,19],"NOR":[3,4,6,7,8,9,14,15,19],"ARG":[2,3,6,9,13,14,15,16,18,20],"ALG":[2,4,7,9,10,14,18,19],"AUT":[3,7,15,17,18],"JOR":[3,8,13,15,16,19,20],"POR":[2,3,6,10,13,14,16,17],"COD":[2,4,5,6,7,11,13,17],"UZB":[1,2,3,7,8,12,14,16],"COL":[2,5,14,19,20],"ENG":[1,4,7,9,18,19,20],"CRO":[2,3,4,5,9,12,19,20],"GHA":[2,7,14,18,19],"PAN":[2,4,5,8,9,13,15,17,19,20]}},"Sebastian Martinez":{"location":"Annandale, NSW (relativamente cerca)","meetPoint":"Por definir","notas":"","conflicto":null,"specialDeal":null,"have":{"FWC_pergamino":{"11":1},"MEX":{"7":1,"10":1,"17":1},"RSA":{"1":1,"2":1,"6":1,"7":1,"10":1,"11":1,"17":1,"20":1},"KOR":{"1":1,"5":1,"10":1,"14":1,"16":1},"CZE":{"1":1,"5":1,"9":1,"13":1,"14":1},"CAN":{"4":1,"5":1,"10":1,"11":1,"14":1},"BIH":{"7":1,"11":1,"13":1,"14":1,"15":1,"17":1,"18":1,"20":1},"QAT":{"5":1,"8":1,"9":1,"16":1},"SUI":{"1":1,"8":1,"9":1,"14":1},"BRA":{"9":1,"14":1},"MAR":{"2":1},"HAI":{"1":1,"20":1},"SCO":{"1":1,"2":1},"USA":{"8":1},"PAR":{"14":1,"17":1,"20":1},"AUS":{"10":1,"17":1},"TUR":{"8":1,"18":1},"GER":{"3":1},"CUW":{"4":1,"20":1},"ECU":{"2":1},"NED":{"1":1,"3":1,"7":1},"JPN":{"1":1},"SWE":{"12":1},"TUN":{"7":1,"8":1,"13":1,"20":1},"BEL":{"1":1,"7":1,"10":1},"EGY":{"1":1,"3":1,"9":1,"10":1,"16":1},"IRN":{"6":1,"20":1},"NZL":{"2":1,"3":1,"10":1,"15":1,"17":1,"18":1,"19":1},"ESP":{"9":1,"10":1,"15":1},"CPV":{"4":1,"7":1,"10":1,"16":1},"KSA":{"13":1,"14":1,"18":1},"URU":{"15":1,"18":1},"FRA":{"19":1},"SEN":{"13":1,"15":1,"16":1,"18":1,"19":1,"20":1},"IRQ":{"3":1,"6":1},"NOR":{"6":1,"9":1,"16":1},"ARG":{"3":1,"12":1,"15":1},"ALG":{"6":1,"13":1,"18":1,"19":1},"AUT":{"1":1,"2":1,"12":1,"20":1},"POR":{"3":1,"7":1},"COD":{"4":1,"20":1},"UZB":{"8":1,"12":1},"ENG":{"3":1,"4":1,"7":1},"CRO":{"3":1,"5":1,"15":1,"17":1,"19":1},"GHA":{"1":1},"PAN":{"17":1,"18":1}},"need":{"FWC_trofeo":[1,2,3,4],"FWC_mundo":[5],"CPV":[2],"NOR":[15],"COL":[1,4,8,18,19,20],"ENG":[11]}},"Luis Salgado":{"location":"Strathfield, NSW","meetPoint":"Por definir","notas":"","conflicto":null,"specialDeal":null,"have":{"FWC_pergamino":{"14":1},"MEX":{"10":1,"12":1,"17":1},"RSA":{"2":1,"3":1,"4":1,"5":1,"11":1,"12":1,"18":1,"20":1},"KOR":{"1":1,"2":1,"5":1,"6":1,"15":1},"CZE":{"1":1,"2":1,"5":1,"6":1,"9":1,"10":1},"CAN":{"2":1,"7":1,"13":1,"14":1,"18":1},"BIH":{"1":1,"3":1,"8":1,"9":1,"10":1,"11":1,"13":1,"14":1,"16":1,"20":1},"QAT":{"7":1,"8":1,"12":1,"14":1},"SUI":{"2":1,"8":1,"10":1,"12":1,"18":1},"BRA":{"3":1,"6":1,"8":1,"9":1,"10":1,"12":1,"17":1,"19":1},"MAR":{"2":1,"6":1,"7":1,"14":1,"18":1,"20":1},"HAI":{"1":1,"7":1,"8":1,"11":1,"13":1,"16":1,"20":1},"SCO":{"2":1,"3":1,"8":1},"USA":{"3":1,"5":1,"7":1,"8":1,"11":1,"12":1,"17":1,"20":1},"PAR":{"1":1,"4":1,"6":1,"9":1,"12":1,"15":1},"AUS":{"6":1,"10":1,"15":1},"TUR":{"3":1,"7":1,"8":1,"9":1,"10":1,"11":1,"12":1,"14":1,"15":1,"16":1,"17":1,"19":1,"20":1},"GER":{"4":1,"5":1,"6":1,"14":1,"15":1,"20":1},"CUW":{"8":1,"9":1,"16":1,"17":1,"19":1,"20":1},"CIV":{"3":1,"7":1,"9":1,"10":1,"16":1},"ECU":{"4":1,"5":1,"6":1,"15":1},"NED":{"9":1,"13":1,"16":1,"18":1,"20":1},"JPN":{"12":1,"14":1},"SWE":{"1":1,"2":1,"3":1,"4":1,"5":1,"8":1,"13":1,"17":1,"18":1,"19":1},"TUN":{"5":1,"11":1,"12":1,"14":1,"17":1},"BEL":{"2":1,"4":1,"6":1,"11":1,"16":1,"17":1,"19":1},"EGY":{"1":1,"3":1,"10":1,"15":1},"IRN":{"1":1,"4":1,"15":1,"18":1},"NZL":{"2":1,"6":1,"10":1,"13":1,"17":1,"19":1,"20":1},"ESP":{"1":1,"15":1,"19":1},"CPV":{"6":1,"16":1},"KSA":{"4":1,"12":1,"14":1,"17":1,"18":1},"URU":{"6":1,"12":1,"14":1,"15":1,"16":1,"17":1,"20":1},"FRA":{"1":1,"2":1,"3":1,"7":1,"11":1,"12":1},"SEN":{"1":1,"4":1,"5":1,"8":1,"13":1,"15":1},"IRQ":{"8":1,"10":1,"12":1,"13":1,"15":1,"16":1,"19":1},"NOR":{"13":1},"ARG":{"4":1,"13":1},"ALG":{"3":1,"11":1},"AUT":{"1":1,"10":1,"12":1,"16":1,"17":1,"19":1,"20":1},"JOR":{"5":1,"10":1,"14":1},"POR":{"13":1,"14":1},"COD":{"9":1,"17":1,"19":1},"UZB":{"2":1,"3":1,"4":1,"6":1,"8":1,"12":1,"18":1},"COL":{"1":1,"8":1},"ENG":{"3":1,"5":1,"7":1},"CRO":{"1":1,"3":1,"6":1,"7":1,"10":1,"12":1,"17":1},"GHA":{"1":1,"15":1},"PAN":{"4":1,"14":1,"17":1,"18":1}},"need":{"FWC_mundo":[6,8],"KOR":[18],"HAI":[17],"TUR":[2,13],"GER":[8],"CUW":[13],"JPN":[13],"SWE":[9,14],"EGY":[13],"IRN":[12],"ESP":[2],"CPV":[8,13],"KSA":[19,20],"FRA":[15],"AUT":[7],"JOR":[13],"COD":[12],"COL":[4,5],"ENG":[17],"CRO":[13],"GHA":[2,5,9,10,14],"PAN":[13,15,20]}},"Cristy Andrade":{"location":"Trabaja en Chippendale — ahí se hará el intercambio","meetPoint":"Chippendale (su trabajo)","notas":"FWC '00' (Panini Logo) no está catalogado en tu base de datos, igual que con Wilson — se excluyó del cruce.","conflicto":null,"specialDeal":{"recibo_code":"POR","recibo_num":15,"doy_code":"ARG","doy_num":17},"have":{"MEX":{"3":1,"17":1},"RSA":{"1":1,"5":1},"KOR":{"1":1},"CZE":{"4":1},"CAN":{"2":1,"3":1,"6":1,"13":1,"14":1,"16":1,"17":1,"18":1,"19":1},"BIH":{"3":1,"8":1,"15":1},"QAT":{"3":1,"14":1},"SUI":{"8":1,"11":1,"13":1,"20":1},"BRA":{"1":1,"7":1,"8":1,"15":1},"HAI":{"5":1,"6":1},"SCO":{"1":1,"18":1},"USA":{"6":1,"8":1,"12":1,"13":1,"17":1},"AUS":{"6":1},"TUR":{"13":1,"20":1},"GER":{"8":1,"20":1},"CUW":{"3":1},"CIV":{"20":1},"ECU":{"1":1},"NED":{"11":1,"17":1,"19":1,"20":1},"JPN":{"1":1,"3":1,"6":1,"19":1},"SWE":{"14":1},"TUN":{"19":1,"20":1},"BEL":{"1":1,"7":1,"11":1,"13":1},"EGY":{"16":1},"IRN":{"1":1,"9":1,"16":1},"NZL":{"13":1,"20":1},"ESP":{"3":1,"6":1,"9":1},"CPV":{"2":1,"16":1},"KSA":{"4":1},"URU":{"3":1,"14":1,"16":1},"FRA":{"2":1,"3":1,"9":1,"16":1},"SEN":{"4":1,"8":1,"14":1},"IRQ":{"6":1,"9":1,"19":1},"NOR":{"10":1,"11":1,"19":1},"ARG":{"10":1},"ALG":{"3":1,"16":1,"19":1},"AUT":{"7":1,"20":1},"JOR":{"2":1,"12":1},"POR":{"15":1},"COD":{"7":1,"13":1},"COL":{"7":1,"19":1},"ENG":{"6":1,"9":1,"20":1},"CRO":{"7":1},"GHA":{"5":1,"8":1,"19":1},"PAN":{"1":1,"7":1,"9":1},"FWC_pergamino":{"16":1}},"need":{"FWC_trofeo":[1],"FWC_pergamino":[13],"MEX":[9],"RSA":[7,12],"KOR":[9],"BIH":[17,19],"SUI":[15,18],"MAR":[13,18],"HAI":[10],"SCO":[2],"PAR":[19],"TUR":[15,17],"GER":[10,18],"CUW":[15],"CIV":[18],"ECU":[18],"NED":[2,8],"JPN":[10],"TUN":[15],"EGY":[15],"NZL":[5],"ESP":[11],"URU":[6],"FRA":[15],"SEN":[17],"NOR":[1,4],"ARG":[13],"ALG":[7,12],"AUT":[9],"JOR":[13,16],"POR":[2,7,8,12,13,14,16],"COD":[6,14],"UZB":[7,15],"COL":[8],"ENG":[3],"CRO":[6,9,14],"GHA":[4,7,15]}}},"sales":[{"buyer":"Sebastian Rodriguez","location":"Trabaja en Randwick, vive en Bankstown — punto de encuentro: A DEFINIR (punto medio, ej. Central Station/Redfern/Sydenham)","meetPoint":"Trabaja en Randwick, vive en Bankstown — punto de encuentro: A DEFINIR (punto medio, ej. Central Station/Redfern/Sydenham)","need":{"MEX":[8],"KOR":[15],"CAN":[8,15],"QAT":[2],"BRA":[1,8,11],"HAI":[11,17],"USA":[5,6,13,16],"PAR":[13,18],"TUR":[15],"GER":[8],"CUW":[13],"CIV":[11,19],"ECU":[4,11],"NED":[11],"SWE":[7],"BEL":[6,14],"NZL":[11],"ESP":[8,20],"CPV":[15],"KSA":[8],"URU":[11],"FRA":[2,10],"SEN":[12,16],"IRQ":[3,11,14,18],"ARG":[9,10,14],"AUT":[4,8],"COL":[9,19],"CRO":[13],"PAN":[6]},"precioAlto":[["FRA",10],["CRO",13],["CUW",13]]}],"teamNames":{"FWC":"FIFA World Cup (especiales)","MEX":"México","RSA":"Sudáfrica","KOR":"Corea del Sur","CZE":"Chequia","CAN":"Canadá","BIH":"Bosnia y Herzegovina","QAT":"Catar","SUI":"Suiza","BRA":"Brasil","MAR":"Marruecos","HAI":"Haití","SCO":"Escocia","USA":"Estados Unidos","PAR":"Paraguay","AUS":"Australia","TUR":"Turquía","GER":"Alemania","CUW":"Curazao","CIV":"Costa de Marfil","ECU":"Ecuador","NED":"Países Bajos","JPN":"Japón","SWE":"Suecia","TUN":"Túnez","BEL":"Bélgica","EGY":"Egipto","IRN":"Irán","NZL":"Nueva Zelanda","ESP":"España","CPV":"Cabo Verde","KSA":"Arabia Saudita","URU":"Uruguay","FRA":"Francia","SEN":"Senegal","IRQ":"Irak","NOR":"Noruega","ARG":"Argentina","ALG":"Argelia","AUT":"Austria","JOR":"Jordania","POR":"Portugal","COD":"R.D. Congo","UZB":"Uzbekistán","COL":"Colombia","ENG":"Inglaterra","CRO":"Croacia","GHA":"Ghana","PAN":"Panamá"},"teamTier":{"ARG":"A","ESP":"A","FRA":"A","ENG":"A","POR":"A","BRA":"A","NED":"A","GER":"A","BEL":"B","MAR":"B","CRO":"B","COL":"B","URU":"B","MEX":"B","USA":"B","JPN":"B","SUI":"B","SEN":"B","TUR":"B","SWE":"B","NOR":"B","AUT":"B","CAN":"B","RSA":"C","KOR":"C","CZE":"C","BIH":"C","QAT":"C","HAI":"C","SCO":"C","PAR":"C","AUS":"C","CUW":"C","CIV":"C","ECU":"C","TUN":"C","EGY":"C","IRN":"C","NZL":"C","CPV":"C","KSA":"C","IRQ":"C","ALG":"C","JOR":"C","COD":"C","UZB":"C","GHA":"C","PAN":"C"},"tierLabel":{"A":"Nivel A — Élite/Campeón","B":"Nivel B — Fuerte","C":"Nivel C — Estándar/Debutante"},"premium":{"BRA 2":"Alisson","BRA 4":"Marquinhos","GER 10":"Kimmich","NED 14":"De Jong","BEL 2":"Courtois","BEL 15":"De Bruyne","BEL 20":"Lukaku","EGY 17":"Salah","NZL 6":"Tim Payne","ESP 11":"Pedri","FRA 10":"Camavinga","NOR 10":"Ødegaard","NOR 15":"Haaland","ARG 17":"Messi — SOLO x Cristiano Ronaldo","ARG 19":"Julián Álvarez","POR 9":"Bernardo Silva","POR 14":"João Neves","COL 14":"James Rodríguez","ENG 18":"Harry Kane","ENG 6":"Alexander-Arnold","CRO 9":"Modrić","CRO 10":"Kovačić","POR 15":"Cristiano Ronaldo"},"fwcLabels":{"FWC_trofeo":"FWC 🏆","FWC_mundo":"FWC 🌎","FWC_pergamino":"FWC 📜"},"fwcSubtypeLabel":{"FWC_trofeo":"🏆 Trofeo","FWC_mundo":"🌎 Mundo","FWC_pergamino":"📜 Historia/Museo"}};
+
+// ============================================================================
+// MOTOR DE DATOS Y CRUCE — opera sobre `state` (mutable, persistido) usando
+// las constantes estáticas de SEED (equipos, niveles, premium, FWC).
+// ============================================================================
+
+function categoryOf(code, num) {
+  if (code.startsWith('FWC')) return 'Especial FWC';
+  if (num === 1) return 'Hologram equipo (#1)';
+  if (num === 13) return 'Foto equipo (#13)';
+  return 'Jugador';
+}
+
+function premiumOf(code, num) {
+  return SEED.premium[`${code} ${num}`] || '';
+}
+
+function displayTeam(code) {
+  return SEED.fwcLabels[code] || code;
+}
+
+function stickerDisplay(code, num) {
+  return `${displayTeam(code)} ${num}`;
+}
+
+function bucketKey(code, num) {
+  const premium = premiumOf(code, num);
+  if (premium) return 'Premium';
+  const cat = categoryOf(code, num);
+  if (cat === 'Hologram equipo (#1)' || cat === 'Foto equipo (#13)') {
+    const tier = SEED.teamTier[code] || 'C';
+    return `${cat} | Nivel ${tier}`;
+  }
+  if (cat === 'Especial FWC') {
+    return `Especial FWC | ${code}`;
+  }
+  return cat;
+}
+
+function baseBucket(code, num) {
+  const premium = premiumOf(code, num);
+  if (premium) return 'Premium';
+  const cat = categoryOf(code, num);
+  if (cat === 'Hologram equipo (#1)' || cat === 'Foto equipo (#13)') return cat;
+  if (cat === 'Especial FWC') return `Especial FWC | ${code}`;
+  return cat;
+}
+
+function categoryLabelOf(code, num) {
+  const premium = premiumOf(code, num);
+  if (premium) return `Jugador destacado — ${premium}`;
+  const cat = categoryOf(code, num);
+  if (cat === 'Hologram equipo (#1)' || cat === 'Foto equipo (#13)') {
+    const tier = SEED.teamTier[code] || 'C';
+    const teamName = SEED.teamNames[code] || code;
+    return `${cat} — ${teamName} (${SEED.tierLabel[tier]})`;
+  }
+  if (cat === 'Especial FWC') {
+    const subtype = SEED.fwcSubtypeLabel[code] || '';
+    return subtype ? `Especial FWC (${subtype})` : cat;
+  }
+  return cat;
+}
+
+function tengoQty(code, num) {
+  const t = state.tengo[code];
+  if (!t) return 0;
+  const q = t[String(num)];
+  return q || 0;
+}
+
+function necesitoHas(code, num) {
+  const n = state.necesito[code];
+  return !!n && n.includes(num);
+}
+
+function shortLabel(label) {
+  return label.split('—')[0].trim();
+}
+
+// ----------------------------------------------------------------------------
+// Emparejamiento por persona: recibo (lo que ELLA tiene y Daniel necesita) vs
+// doy (lo que Daniel tiene y ELLA necesita), agrupado por bucket (con nivel/
+// subtipo) y emparejado 1x1 dentro de cada bucket.
+// ----------------------------------------------------------------------------
+function computePersonMatches(personName) {
+  const person = state.people[personName];
+  if (!person) return { special: [], pairs: [] };
+
+  // --- recibo_all: lo que tiene y Daniel necesita ---
+  const reciboAll = [];
+  for (const code in person.have) {
+    for (const numStr in person.have[code]) {
+      const num = parseInt(numStr, 10);
+      const qty = person.have[code][numStr];
+      if (necesitoHas(code, num)) {
+        reciboAll.push({ code, num, qty });
+      }
+    }
+  }
+  // --- doy_all: lo que Daniel tiene y ella necesita ---
+  const doyAll = [];
+  for (const code in person.need) {
+    for (const num of person.need[code]) {
+      const qty = tengoQty(code, num);
+      if (qty > 0) {
+        doyAll.push({ code, num, qty });
+      }
+    }
+  }
+
+  // --- trato especial confirmado (excluir de las bolsas genéricas) ---
+  const special = [];
+  let reciboRest = reciboAll;
+  let doyRest = doyAll;
+  if (person.specialDeal) {
+    const sd = person.specialDeal;
+    reciboRest = reciboAll.filter(r => !(r.code === sd.recibo_code && r.num === sd.recibo_num));
+    doyRest = doyAll.filter(d => !(d.code === sd.doy_code && d.num === sd.doy_num));
+    special.push({
+      id: `${personName}::special::${sd.doy_code} ${sd.doy_num}`,
+      recibo_code: sd.recibo_code, recibo_num: sd.recibo_num,
+      doy_code: sd.doy_code, doy_num: sd.doy_num,
+    });
+  }
+
+  // --- bucketizar y emparejar 1x1 ---
+  const reciboByBucket = {};
+  const doyByBucket = {};
+  for (const r of reciboRest) {
+    const b = bucketKey(r.code, r.num);
+    (reciboByBucket[b] = reciboByBucket[b] || []).push(r);
+  }
+  for (const d of doyRest) {
+    const b = bucketKey(d.code, d.num);
+    (doyByBucket[b] = doyByBucket[b] || []).push(d);
+  }
+
+  const pairs = [];
+  const allBuckets = new Set([...Object.keys(reciboByBucket), ...Object.keys(doyByBucket)]);
+  for (const b of allBuckets) {
+    const rl = (reciboByBucket[b] || []).slice().sort((a, c) => (a.code + a.num).localeCompare(c.code + c.num));
+    const dl = (doyByBucket[b] || []).slice().sort((a, c) => (a.code + a.num).localeCompare(c.code + c.num));
+    const n = Math.min(rl.length, dl.length);
+    for (let i = 0; i < n; i++) {
+      const r = rl[i], d = dl[i];
+      const rKey = stickerDisplay(r.code, r.num);
+      const dKey = stickerDisplay(d.code, d.num);
+      pairs.push({
+        id: `${personName}::pair::${dKey}::${rKey}`,
+        recibo_code: r.code, recibo_num: r.num,
+        doy_code: d.code, doy_num: d.num,
+        recibo_base_bucket: baseBucket(r.code, r.num),
+        doy_base_bucket: baseBucket(d.code, d.num),
+      });
+    }
+  }
+  return { special, pairs };
+}
+
+function computeSaleMatches(buyer) {
+  const sale = state.sales.find(s => s.buyer === buyer);
+  if (!sale) return [];
+  const matches = [];
+  for (const code in sale.need) {
+    for (const num of sale.need[code]) {
+      const qty = tengoQty(code, num);
+      if (qty > 0) matches.push({ code, num, qty });
+    }
+  }
+  matches.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+  return matches;
+}
+
+
+</script>
+<script>
+// ============================================================================
+// ESTADO
+// ============================================================================
+var state = { tengo: {}, necesito: {}, people: {}, sales: [] };
+var checked = new Set();
+var swaps = {};
+var doySwaps = {};
+var extras = {};
+var meetInfo = {};
+var loaded = false;
+var currentTab = 'trades';
+var currentDbSub = 'inventario';
+var openPersonName = null;
+var tengoFilter = '';
+var necesitoFilter = '';
+let _matchCache = {};
+
+function getMatches(personName) {
+  if (!_matchCache[personName]) _matchCache[personName] = computePersonMatches(personName);
+  return _matchCache[personName];
+}
+
+// ============================================================================
+// CARGA / GUARDADO
+// ============================================================================
+async function loadAll() {
+  try {
+    const res = await window.storage.get('panini-db-state', false);
+    if (res && res.value) {
+      const saved = JSON.parse(res.value);
+      state.tengo = saved.tengo || {};
+      state.necesito = saved.necesito || {};
+      state.people = saved.people || {};
+      state.sales = saved.sales || [];
+    } else {
+      throw new Error('sin datos guardados aún');
+    }
+  } catch (e) {
+    state.tengo = JSON.parse(JSON.stringify(SEED.tengo));
+    state.necesito = JSON.parse(JSON.stringify(SEED.necesito));
+    state.people = JSON.parse(JSON.stringify(SEED.people));
+    state.sales = JSON.parse(JSON.stringify(SEED.sales));
+    await saveDbState();
+  }
+
+  try {
+    const r = await window.storage.get('panini-tracker-checked', false);
+    if (r && r.value) checked = new Set(JSON.parse(r.value));
+  } catch (e) {}
+  try {
+    const r = await window.storage.get('panini-tracker-swaps', false);
+    if (r && r.value) swaps = JSON.parse(r.value);
+  } catch (e) {}
+  try {
+    const r = await window.storage.get('panini-tracker-doyswaps', false);
+    if (r && r.value) doySwaps = JSON.parse(r.value);
+  } catch (e) {}
+  try {
+    const r = await window.storage.get('panini-tracker-extras', false);
+    if (r && r.value) extras = JSON.parse(r.value);
+  } catch (e) {}
+  try {
+    const r = await window.storage.get('panini-tracker-meet', false);
+    if (r && r.value) meetInfo = JSON.parse(r.value);
+  } catch (e) {}
+
+  loaded = true;
+  renderAll();
+}
+
+async function saveDbState() {
+  try {
+    await window.storage.set('panini-db-state', JSON.stringify({
+      tengo: state.tengo, necesito: state.necesito, people: state.people, sales: state.sales,
+    }), false);
+  } catch (e) { console.error('No se pudo guardar la base de datos', e); }
+}
+
+async function saveTrackingState() {
+  try {
+    await window.storage.set('panini-tracker-checked', JSON.stringify([...checked]), false);
+    await window.storage.set('panini-tracker-swaps', JSON.stringify(swaps), false);
+    await window.storage.set('panini-tracker-doyswaps', JSON.stringify(doySwaps), false);
+    await window.storage.set('panini-tracker-extras', JSON.stringify(extras), false);
+    await window.storage.set('panini-tracker-meet', JSON.stringify(meetInfo), false);
+  } catch (e) { console.error('No se pudo guardar el progreso', e); }
+}
+
+function renderAll() {
+  if (!loaded) return;
+  _matchCache = {};
+  renderTrades();
+  renderDbInventario();
+  renderDbPersonas();
+  renderDbVentas();
+}
+
+// ============================================================================
+// TABS
+// ============================================================================
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('page-trades').classList.toggle('active', tab === 'trades');
+  document.getElementById('page-db').classList.toggle('active', tab === 'db');
+  document.getElementById('tabTradesBtn').classList.toggle('active', tab === 'trades');
+  document.getElementById('tabDbBtn').classList.toggle('active', tab === 'db');
+  document.getElementById('summaryBar').style.display = tab === 'trades' ? 'flex' : 'none';
+  document.getElementById('footerText').style.display = tab === 'trades' ? 'block' : 'none';
+}
+
+function switchDbSub(sub) {
+  currentDbSub = sub;
+  document.getElementById('db-inventario').style.display = sub === 'inventario' ? 'block' : 'none';
+  document.getElementById('db-personas').style.display = sub === 'personas' ? 'block' : 'none';
+  document.getElementById('db-ventas').style.display = sub === 'ventas' ? 'block' : 'none';
+  document.querySelectorAll('.db-subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.sub === sub));
+}
+
+// ============================================================================
+// TOGGLE / CHECK
+// ============================================================================
+function toggle(id) {
+  if (checked.has(id)) checked.delete(id);
+  else checked.add(id);
+  saveTrackingState();
+  renderAll();
+}
+
+function pairPersonName(pairId) {
+  if (pairId.includes('::pair::')) return pairId.split('::pair::')[0];
+  if (pairId.includes('::special::')) return pairId.split('::special::')[0];
+  return pairId;
+}
+
+function personCandidates(personName) {
+  const person = state.people[personName];
+  const list = [];
+  for (const code in person.have) {
+    for (const numStr in person.have[code]) {
+      const num = parseInt(numStr, 10);
+      if (necesitoHas(code, num)) {
+        list.push({ key: stickerDisplay(code, num), label: categoryLabelOf(code, num), base_bucket: baseBucket(code, num), qty: person.have[code][numStr] });
+      }
+    }
+  }
+  return list;
+}
+
+function personNeedList(personName) {
+  const person = state.people[personName];
+  const list = [];
+  for (const code in person.need) for (const num of person.need[code]) list.push(stickerDisplay(code, num));
+  return list;
+}
+
+function danielStockList() {
+  const list = [];
+  for (const code in state.tengo) {
+    for (const numStr in state.tengo[code]) {
+      const num = parseInt(numStr, 10);
+      const qty = state.tengo[code][numStr];
+      if (qty > 0) list.push({ key: stickerDisplay(code, num), label: categoryLabelOf(code, num), base_bucket: baseBucket(code, num), qty });
+    }
+  }
+  return list;
+}
+
+function effectiveRecibo(pair) {
+  const ov = swaps[pair.id];
+  if (ov) return ov;
+  return stickerDisplay(pair.recibo_code, pair.recibo_num);
+}
+function effectiveReciboLabel(pair) {
+  const ov = swaps[pair.id];
+  if (!ov) return categoryLabelOf(pair.recibo_code, pair.recibo_num);
+  const cand = personCandidates(pairPersonName(pair.id)).find(c => c.key === ov);
+  return cand ? cand.label : categoryLabelOf(pair.recibo_code, pair.recibo_num);
+}
+function effectiveDoy(pair) {
+  const ov = doySwaps[pair.id];
+  if (ov) return ov;
+  return stickerDisplay(pair.doy_code, pair.doy_num);
+}
+function effectiveDoyLabel(pair) {
+  const ov = doySwaps[pair.id];
+  if (!ov) return categoryLabelOf(pair.doy_code, pair.doy_num);
+  const cand = danielStockList().find(c => c.key === ov);
+  return cand ? cand.label : categoryLabelOf(pair.doy_code, pair.doy_num);
+}
+
+function usedReciboCountForPerson(personName, key, excludePairId) {
+  const { pairs } = getMatches(personName);
+  let count = 0;
+  for (const pr of pairs) {
+    if (pr.id !== excludePairId) {
+      if (effectiveRecibo(pr) === key) count++;
+    }
+    count += getExtras(pr.id, 'recibo').filter(k => k === key).length;
+  }
+  return count;
+}
+
+function usedCountFor(stickerKey, excludeId) {
+  let count = 0;
+  for (const name of Object.keys(state.people)) {
+    const { special, pairs } = getMatches(name);
+    for (const s of special) {
+      const doyKey = stickerDisplay(s.doy_code, s.doy_num);
+      if (doyKey === stickerKey && checked.has(s.id) && s.id !== excludeId) count++;
+    }
+    for (const pr of pairs) {
+      if (pr.id !== excludeId) {
+        if (effectiveDoy(pr) === stickerKey && checked.has(pr.id)) count++;
+      }
+      if (checked.has(pr.id)) {
+        count += getExtras(pr.id, 'doy').filter(k => k === stickerKey).length;
+      }
+    }
+  }
+  for (const s of state.sales) {
+    for (const item of computeSaleMatches(s.buyer)) {
+      const key = stickerDisplay(item.code, item.num);
+      const id = `${s.buyer}::sale::${key}`;
+      if (key === stickerKey && checked.has(id) && id !== excludeId) count++;
+    }
+  }
+  return count;
+}
+
+function stockRemainingText(stickerKey, usedExcl) {
+  const parts = stickerKey.split(' ');
+  const num = parseInt(parts[parts.length - 1], 10);
+  const code = parts.slice(0, -1).join(' ');
+  // el key usa el nombre de display del FWC; buscamos el codigo real
+  let realCode = code;
+  for (const c in SEED.fwcLabels) if (SEED.fwcLabels[c] === code) realCode = c;
+  const total = tengoQty(realCode, num) || 1;
+  const remaining = total - usedExcl;
+  return { total, remaining };
+}
+
+// ============================================================================
+// EXTRAS (sumar stickers para compensar valor)
+// ============================================================================
+function getExtras(pairId, side) {
+  return (extras[pairId] && extras[pairId][side]) || [];
+}
+function addExtra(pairId, side, key) {
+  if (!key) return;
+  if (!extras[pairId]) extras[pairId] = { recibo: [], doy: [] };
+  extras[pairId][side].push(key);
+  saveTrackingState();
+  renderAll();
+}
+function removeExtra(pairId, side, index) {
+  extras[pairId][side].splice(index, 1);
+  saveTrackingState();
+  renderAll();
+}
+function findPairById(pairId) {
+  const personName = pairPersonName(pairId);
+  const { pairs } = getMatches(personName);
+  return pairs.find(p => p.id === pairId) || null;
+}
+function findLabelForKey(pairId, side, key) {
+  const personName = pairPersonName(pairId);
+  if (side === 'recibo') {
+    const c = personCandidates(personName).find(c => c.key === key);
+    return c ? c.label : key;
+  } else {
+    const c = danielStockList().find(c => c.key === key);
+    return c ? c.label : key;
+  }
+}
+function computeAddCandidates(pairId, side, scope) {
+  const pair = findPairById(pairId);
+  if (!pair) return [];
+  const personName = pairPersonName(pairId);
+  const person = state.people[personName];
+  if (side === 'recibo') {
+    const bucket = pair.recibo_base_bucket;
+    return personCandidates(personName)
+      .filter(c => scope === 'all' || c.base_bucket === bucket)
+      .filter(c => usedReciboCountForPerson(personName, c.key, '') < c.qty)
+      .sort((a, b) => a.key.localeCompare(b.key));
+  } else {
+    const bucket = pair.doy_base_bucket;
+    return danielStockList()
+      .filter(c => scope === 'all' || c.base_bucket === bucket)
+      .filter(c => personNeedList(personName).includes(c.key))
+      .filter(c => (c.qty - usedCountFor(c.key, '')) > 0)
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }
+}
+function refreshAddCandidates(scopeSelectEl) {
+  const pairId = scopeSelectEl.dataset.pair;
+  const side = scopeSelectEl.dataset.side;
+  const scope = scopeSelectEl.value;
+  const candidateSelect = scopeSelectEl.parentElement.querySelector('.add-extra-pick');
+  const list = computeAddCandidates(pairId, side, scope);
+  candidateSelect.innerHTML = list.map(c => `<option value="${c.key}">${c.key} — ${shortLabel(c.label)}</option>`).join('') || '<option value="">(sin opciones disponibles)</option>';
+}
+function confirmAddExtra(btnEl) {
+  const pairId = btnEl.dataset.pair;
+  const side = btnEl.dataset.side;
+  const candidateSelect = btnEl.parentElement.querySelector('.add-extra-pick');
+  addExtra(pairId, side, candidateSelect.value);
+}
+function swapRecibo(selectEl) {
+  const pairId = selectEl.dataset.pair;
+  const value = selectEl.value;
+  if (value === '') delete swaps[pairId]; else swaps[pairId] = value;
+  saveTrackingState();
+  renderAll();
+}
+function swapDoy(selectEl) {
+  const pairId = selectEl.dataset.pair;
+  const value = selectEl.value;
+  if (value === '') delete doySwaps[pairId]; else doySwaps[pairId] = value;
+  saveTrackingState();
+  renderAll();
+}
+function updateMeet(inputEl, field) {
+  const person = inputEl.dataset.person;
+  if (!meetInfo[person]) meetInfo[person] = {};
+  meetInfo[person][field] = inputEl.value;
+  saveTrackingState();
+  renderAll();
+}
+
+// ============================================================================
+// RENDER — PÁGINA DE INTERCAMBIOS
+// ============================================================================
+function renderTradeRow(item, isSpecial) {
+  const stickerKey = isSpecial ? stickerDisplay(item.doy_code, item.doy_num) : effectiveDoy(item);
+  const isChecked = checked.has(item.id);
+  const usedByOthers = usedCountFor(stickerKey, item.id);
+  const { total, remaining } = stockRemainingText(stickerKey, usedByOthers);
+  const blocked = !isChecked && remaining <= 0;
+
+  let rowClass = 'trade-row';
+  if (isSpecial) rowClass += ' special';
+  if (isChecked) rowClass += ' done';
+  else if (blocked) rowClass += ' blocked';
+
+  let note = '';
+  if (blocked) note = `<div class="stock-note blocked-text">⚠ Ya no disponible — este ${stickerKey} se usó en otro intercambio</div>`;
+  else if (!isChecked && total > 1 && remaining < total) note = `<div class="stock-note low-text">Quedan ${remaining} de ${total} disponibles</div>`;
+  else if (!isChecked && total > 1) note = `<div class="stock-note">Tienes ${total} disponibles</div>`;
+
+  const recibo = isSpecial ? stickerDisplay(item.recibo_code, item.recibo_num) : effectiveRecibo(item);
+  const reciboLabel = isSpecial ? categoryLabelOf(item.recibo_code, item.recibo_num) : effectiveReciboLabel(item);
+  const doy = isSpecial ? stickerDisplay(item.doy_code, item.doy_num) : stickerKey;
+  const doyLabel = isSpecial ? categoryLabelOf(item.doy_code, item.doy_num) : effectiveDoyLabel(item);
+
+  let reciboSwapHtml = '', doySwapHtml = '', reciboExtrasHtml = '', doyExtrasHtml = '', reciboAddHtml = '', doyAddHtml = '';
+  if (!isSpecial) {
+    const personName = pairPersonName(item.id);
+
+    const isReciboOverridden = !!swaps[item.id];
+    const reciboOptions = personCandidates(personName)
+      .filter(c => c.base_bucket === item.recibo_base_bucket)
+      .filter(c => c.key === recibo || usedReciboCountForPerson(personName, c.key, item.id) < c.qty)
+      .sort((a, b) => a.key.localeCompare(b.key));
+    if (reciboOptions.length > 1) {
+      let opts = `<option value="">↺ Original: ${stickerDisplay(item.recibo_code, item.recibo_num)}</option>`;
+      for (const c of reciboOptions) opts += `<option value="${c.key}" ${c.key === recibo ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
+      reciboSwapHtml = `<select class="swap-select ${isReciboOverridden ? 'overridden' : ''}" data-pair="${item.id}" onchange="swapRecibo(this)" ${isChecked ? 'disabled' : ''}>${opts}</select>`;
+    }
+
+    const isDoyOverridden = !!doySwaps[item.id];
+    const doyOptions = danielStockList()
+      .filter(c => c.base_bucket === item.doy_base_bucket)
+      .filter(c => personNeedList(personName).includes(c.key))
+      .filter(c => c.key === doy || (c.qty - usedCountFor(c.key, item.id)) > 0)
+      .sort((a, b) => a.key.localeCompare(b.key));
+    if (doyOptions.length > 1) {
+      let opts = `<option value="">↺ Original: ${stickerDisplay(item.doy_code, item.doy_num)}</option>`;
+      for (const c of doyOptions) opts += `<option value="${c.key}" ${c.key === doy ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
+      doySwapHtml = `<select class="swap-select ${isDoyOverridden ? 'overridden' : ''}" data-pair="${item.id}" onchange="swapDoy(this)" ${isChecked ? 'disabled' : ''}>${opts}</select>`;
+    }
+
+    const reciboExtras = getExtras(item.id, 'recibo');
+    const doyExtras = getExtras(item.id, 'doy');
+    if (reciboExtras.length) {
+      reciboExtrasHtml = `<div class="extras-list">${reciboExtras.map((k, i) => `<span class="extra-chip" title="${findLabelForKey(item.id, 'recibo', k)}">+ ${k} ${isChecked ? '' : `<button onclick="removeExtra('${item.id}','recibo',${i})">✕</button>`}</span>`).join('')}</div>`;
+    }
+    if (doyExtras.length) {
+      doyExtrasHtml = `<div class="extras-list">${doyExtras.map((k, i) => `<span class="extra-chip" title="${findLabelForKey(item.id, 'doy', k)}">+ ${k} ${isChecked ? '' : `<button onclick="removeExtra('${item.id}','doy',${i})">✕</button>`}</span>`).join('')}</div>`;
+    }
+
+    if (!isChecked) {
+      const reciboSameOpts = computeAddCandidates(item.id, 'recibo', 'same');
+      reciboAddHtml = `<div class="add-extra-row">
+        <select class="add-extra-scope" data-pair="${item.id}" data-side="recibo" onchange="refreshAddCandidates(this)">
+          <option value="same">Misma categoría</option><option value="all">Todas las categorías</option>
+        </select>
+        <select class="add-extra-pick">${reciboSameOpts.map(c => `<option value="${c.key}">${c.key} — ${shortLabel(c.label)}</option>`).join('') || '<option value="">(sin opciones)</option>'}</select>
+        <button data-pair="${item.id}" data-side="recibo" onclick="confirmAddExtra(this)">+ sumar</button>
+      </div>`;
+      const doySameOpts = computeAddCandidates(item.id, 'doy', 'same');
+      doyAddHtml = `<div class="add-extra-row">
+        <select class="add-extra-scope" data-pair="${item.id}" data-side="doy" onchange="refreshAddCandidates(this)">
+          <option value="same">Misma categoría</option><option value="all">Todas las categorías</option>
+        </select>
+        <select class="add-extra-pick">${doySameOpts.map(c => `<option value="${c.key}">${c.key} — ${shortLabel(c.label)}</option>`).join('') || '<option value="">(sin opciones)</option>'}</select>
+        <button data-pair="${item.id}" data-side="doy" onclick="confirmAddExtra(this)">+ sumar</button>
+      </div>`;
+    }
+  }
+
+  return `<div class="${rowClass}">
+      <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${item.id.replace(/'/g, "\\'")}')" />
+      <div class="sticker-block">
+        <div class="sticker-code">${recibo}</div>
+        <div class="sticker-label">${reciboLabel}</div>
+        ${reciboSwapHtml}${reciboExtrasHtml}${reciboAddHtml}
+      </div>
+      <div class="arrow">⇄</div>
+      <div class="sticker-block">
+        <div class="sticker-code">${doy}</div>
+        <div class="sticker-label">${doyLabel}</div>
+        ${doySwapHtml}${doyExtrasHtml}${doyAddHtml}
+      </div>
+      ${note ? `<div class="stock-note-wrap" style="grid-column:1/5">${note}</div>` : ''}
+    </div>`;
+}
+
+function renderSaleRow(buyer, item) {
+  const stickerKey = stickerDisplay(item.code, item.num);
+  const id = `${buyer}::sale::${stickerKey}`;
+  const isChecked = checked.has(id);
+  const usedByOthers = usedCountFor(stickerKey, id);
+  const { total, remaining } = stockRemainingText(stickerKey, usedByOthers);
+  const blocked = !isChecked && remaining <= 0;
+  const sale = state.sales.find(s => s.buyer === buyer);
+  const isAlto = (sale.precioAlto || []).some(([c, n]) => c === item.code && n === item.num);
+  const label = categoryLabelOf(item.code, item.num);
+
+  let rowClass = 'trade-row sale-row';
+  if (isChecked) rowClass += ' done'; else if (blocked) rowClass += ' blocked';
+  let note = '';
+  if (blocked) note = `<div class="stock-note blocked-text">⚠ Ya no disponible — se usó en otro intercambio</div>`;
+  else if (!isChecked && total > 1 && remaining < total) note = `<div class="stock-note low-text">Quedan ${remaining} de ${total} disponibles</div>`;
+
+  return `<div class="${rowClass}">
+      <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${id.replace(/'/g, "\\'")}')" />
+      <div class="sticker-block"><div class="sticker-code">${stickerKey}</div><div class="sticker-label">${label}</div></div>
+      <div class="price-tag ${isAlto ? '' : 'low'}">${isAlto ? 'Alto' : 'Estándar/bajo'}</div>
+      ${note ? `<div class="stock-note-wrap" style="grid-column:1/4">${note}</div>` : ''}
+    </div>`;
+}
+
+function computeSummary() {
+  let totalTrades = 0, doneTrades = 0, blockedTrades = 0;
+  for (const name of Object.keys(state.people)) {
+    const { special, pairs } = getMatches(name);
+    for (const s of special) {
+      totalTrades++;
+      if (checked.has(s.id)) doneTrades++;
+      else {
+        const key = stickerDisplay(s.doy_code, s.doy_num);
+        const used = usedCountFor(key, s.id);
+        const { remaining } = stockRemainingText(key, used);
+        if (remaining <= 0) blockedTrades++;
+      }
+    }
+    for (const pr of pairs) {
+      totalTrades++;
+      if (checked.has(pr.id)) doneTrades++;
+      else {
+        const key = effectiveDoy(pr);
+        const used = usedCountFor(key, pr.id);
+        const { remaining } = stockRemainingText(key, used);
+        if (remaining <= 0) blockedTrades++;
+      }
+    }
+  }
+  let totalSales = 0, doneSales = 0;
+  for (const s of state.sales) {
+    for (const item of computeSaleMatches(s.buyer)) {
+      totalSales++;
+      const id = `${s.buyer}::sale::${stickerDisplay(item.code, item.num)}`;
+      if (checked.has(id)) doneSales++;
+    }
+  }
+  return { totalTrades, doneTrades, blockedTrades, totalSales, doneSales };
+}
+
+function renderTrades() {
+  const { totalTrades, doneTrades, blockedTrades, totalSales, doneSales } = computeSummary();
+  document.getElementById('summaryBar').innerHTML = `
+    <div class="pill">✓ <b>${doneTrades}</b>/${totalTrades} intercambios hechos</div>
+    <div class="pill">$ <b>${doneSales}</b>/${totalSales} ventas hechas</div>
+    ${blockedTrades > 0 ? `<div class="pill warn">⚠ <b>${blockedTrades}</b> bloqueados por falta de stock</div>` : ''}`;
+
+  let html = '';
+  for (const name of Object.keys(state.people)) {
+    const person = state.people[name];
+    const { special, pairs } = getMatches(name);
+    const total = special.length + pairs.length;
+    if (total === 0 && !person.conflicto) continue;
+    let done = 0;
+    for (const s of special) if (checked.has(s.id)) done++;
+    for (const pr of pairs) if (checked.has(pr.id)) done++;
+
+    const meet = meetInfo[name] || {};
+    const meetPlace = meet.place !== undefined ? meet.place : person.meetPoint;
+    const meetDate = meet.date || '';
+    const meetTime = meet.time || '';
+
+    html += `<div class="person-card">
+      <div class="person-head">
+        <div><div class="person-name">${name}</div><div class="person-meta">${person.location}</div></div>
+        <div class="progress-chip">${done}/${total}</div>
+        <div class="meet-edit-row">
+          <div class="meet-field"><label>Fecha</label><input type="date" data-person="${name}" value="${meetDate}" onchange="updateMeet(this,'date')" /></div>
+          <div class="meet-field"><label>Hora</label><input type="time" data-person="${name}" value="${meetTime}" onchange="updateMeet(this,'time')" /></div>
+          <div class="meet-field place"><label>Lugar</label><input type="text" placeholder="Lugar de encuentro" data-person="${name}" value="${(meetPlace || '').replace(/"/g, '&quot;')}" onchange="updateMeet(this,'place')" /></div>
+        </div>
+      </div>`;
+    if (person.conflicto) {
+      html += `<div style="padding:10px 16px 0"><div style="font-weight:700;font-size:11px;color:#C00000;font-family:'Barlow Condensed',sans-serif">⏸️ AVISO</div>
+        <div style="font-size:12.5px;padding:4px 0 10px">${person.conflicto}</div></div>`;
+    }
+    for (const s of special) html += renderTradeRow(s, true);
+    for (const pr of pairs) html += renderTradeRow(pr, false);
+    html += `</div>`;
+  }
+
+  html += `<div class="person-card"><div class="person-head"><div><div class="person-name">Ventas</div><div class="person-meta">Duplicados vendidos por dinero</div></div><div class="progress-chip">${doneSales}/${totalSales}</div></div>`;
+  for (const s of state.sales) {
+    const buyerKey = `Venta::${s.buyer}`;
+    const meet = meetInfo[buyerKey] || {};
+    const meetPlace = meet.place !== undefined ? meet.place : s.location;
+    const meetDate = meet.date || '';
+    const meetTime = meet.time || '';
+    html += `<div class="trade-row" style="grid-template-columns:1fr;background:var(--gold-soft);">
+      <div><div class="sticker-code">${s.buyer}</div>
+      <div class="meet-edit-row">
+        <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Fecha</label><input type="date" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetDate}" onchange="updateMeet(this,'date')" /></div>
+        <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Hora</label><input type="time" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetTime}" onchange="updateMeet(this,'time')" /></div>
+        <div class="meet-field place" style="color:var(--ink)"><label style="color:var(--muted)">Lugar</label><input type="text" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" placeholder="Lugar de encuentro" data-person="${buyerKey}" value="${(meetPlace || '').replace(/"/g, '&quot;')}" onchange="updateMeet(this,'place')" /></div>
+      </div></div>
+    </div>`;
+    for (const item of computeSaleMatches(s.buyer)) html += renderSaleRow(s.buyer, item);
+  }
+  html += `</div>`;
+
+  document.getElementById('page-trades').innerHTML = html;
+  document.getElementById('footerText').innerHTML = 'Marca un intercambio como hecho apenas lo confirmes en persona. Si el mismo sticker tuyo está comprometido en otro trato, ese trato se bloquea automáticamente. Cada lado tiene su propio menú para cambiar de sticker, y un cuadro para sumar stickers extra cuando uno vale más que el otro. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
+}
+
+// ============================================================================
+// RENDER — BASE DE DATOS: MI INVENTARIO
+// ============================================================================
+function buildTengoListHtml() {
+  const rows = [];
+  for (const code in state.tengo) {
+    for (const numStr in state.tengo[code]) {
+      const num = parseInt(numStr, 10);
+      rows.push({ code, num, qty: state.tengo[code][numStr] });
+    }
+  }
+  rows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+  const filtered = rows.filter(r => {
+    if (!tengoFilter) return true;
+    const key = stickerDisplay(r.code, r.num).toLowerCase();
+    const label = categoryLabelOf(r.code, r.num).toLowerCase();
+    return key.includes(tengoFilter.toLowerCase()) || label.includes(tengoFilter.toLowerCase());
+  });
+  if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
+  return filtered.map(r => `<div class="db-row">
+      <span class="code">${stickerDisplay(r.code, r.num)}</span>
+      <span class="label">${categoryLabelOf(r.code, r.num)}</span>
+      <input type="number" class="qty-input" min="1" value="${r.qty}" onchange="updateTengoQty('${r.code}',${r.num},this.value)" />
+      <button class="del" onclick="removeTengo('${r.code}',${r.num})">✕</button>
+    </div>`).join('');
+}
+function buildNecesitoListHtml() {
+  const rows = [];
+  for (const code in state.necesito) for (const num of state.necesito[code]) rows.push({ code, num });
+  rows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+  const filtered = rows.filter(r => {
+    if (!necesitoFilter) return true;
+    const key = stickerDisplay(r.code, r.num).toLowerCase();
+    const label = categoryLabelOf(r.code, r.num).toLowerCase();
+    return key.includes(necesitoFilter.toLowerCase()) || label.includes(necesitoFilter.toLowerCase());
+  });
+  if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
+  return filtered.map(r => `<div class="db-row">
+      <span class="code">${stickerDisplay(r.code, r.num)}</span>
+      <span class="label">${categoryLabelOf(r.code, r.num)}</span>
+      <button class="del" onclick="removeNecesito('${r.code}',${r.num})">✕</button>
+    </div>`).join('');
+}
+function onTengoFilterInput(el) {
+  tengoFilter = el.value;
+  document.getElementById('tengoListContainer').innerHTML = buildTengoListHtml();
+}
+function onNecesitoFilterInput(el) {
+  necesitoFilter = el.value;
+  document.getElementById('necesitoListContainer').innerHTML = buildNecesitoListHtml();
+}
+
+function addTengoBulk() {
+  const code = document.getElementById('tengoAddCode').value.trim().toUpperCase();
+  const numsStr = document.getElementById('tengoAddNums').value;
+  const qty = parseInt(document.getElementById('tengoAddQty').value, 10) || 1;
+  const nums = numsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+  if (!code || nums.length === 0) { alert('Completa equipo y al menos un número'); return; }
+  if (!state.tengo[code]) state.tengo[code] = {};
+  for (const n of nums) state.tengo[code][String(n)] = qty;
+  document.getElementById('tengoAddCode').value = '';
+  document.getElementById('tengoAddNums').value = '';
+  document.getElementById('tengoAddQty').value = '1';
+  saveDbState();
+  renderAll();
+}
+function removeTengo(code, num) {
+  delete state.tengo[code][String(num)];
+  if (Object.keys(state.tengo[code]).length === 0) delete state.tengo[code];
+  saveDbState();
+  renderAll();
+}
+function updateTengoQty(code, num, qty) {
+  qty = parseInt(qty, 10);
+  if (isNaN(qty) || qty <= 0) { removeTengo(code, num); return; }
+  state.tengo[code][String(num)] = qty;
+  saveDbState();
+  renderAll();
+}
+function addNecesitoBulk() {
+  const code = document.getElementById('necesitoAddCode').value.trim().toUpperCase();
+  const numsStr = document.getElementById('necesitoAddNums').value;
+  const nums = numsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+  if (!code || nums.length === 0) { alert('Completa equipo y al menos un número'); return; }
+  if (!state.necesito[code]) state.necesito[code] = [];
+  for (const n of nums) if (!state.necesito[code].includes(n)) state.necesito[code].push(n);
+  document.getElementById('necesitoAddCode').value = '';
+  document.getElementById('necesitoAddNums').value = '';
+  saveDbState();
+  renderAll();
+}
+function removeNecesito(code, num) {
+  state.necesito[code] = state.necesito[code].filter(n => n !== num);
+  if (state.necesito[code].length === 0) delete state.necesito[code];
+  saveDbState();
+  renderAll();
+}
+
+function renderDbInventario() {
+  const el = document.getElementById('db-inventario');
+  if (!el) return;
+  const tengoCount = Object.values(state.tengo).reduce((a, o) => a + Object.keys(o).length, 0);
+  const necesitoCount = Object.values(state.necesito).reduce((a, arr) => a + arr.length, 0);
+  el.innerHTML = `
+    <div class="db-section">
+      <h2>Tengo para intercambiar <span style="color:var(--muted);font-size:13px">(${tengoCount})</span></h2>
+      <p class="db-sub">Stickers que tienes disponibles para dar. La cantidad indica cuántas copias tienes de ese sticker.</p>
+      <div class="db-add-form">
+        <input class="code" id="tengoAddCode" placeholder="Equipo (ARG)" />
+        <input class="nums" id="tengoAddNums" placeholder="Números: 1,5,13" />
+        <input class="qty" id="tengoAddQty" type="number" min="1" value="1" placeholder="Cant." />
+        <button onclick="addTengoBulk()">+ Agregar</button>
+        <div class="hint">Código de 3 letras (ARG, POR, FWC_trofeo, FWC_mundo, FWC_pergamino) + números separados por coma.</div>
+      </div>
+      <input class="db-filter" placeholder="Buscar (ej: ARG, Holograma, Messi)..." oninput="onTengoFilterInput(this)" value="${tengoFilter}" />
+      <div class="db-list" id="tengoListContainer">${buildTengoListHtml()}</div>
+    </div>
+    <div class="db-section">
+      <h2>Necesito <span style="color:var(--muted);font-size:13px">(${necesitoCount})</span></h2>
+      <p class="db-sub">Stickers que te faltan para completar el álbum.</p>
+      <div class="db-add-form">
+        <input class="code" id="necesitoAddCode" placeholder="Equipo (ARG)" />
+        <input class="nums" id="necesitoAddNums" placeholder="Números: 1,5,13" />
+        <button onclick="addNecesitoBulk()">+ Agregar</button>
+      </div>
+      <input class="db-filter" placeholder="Buscar..." oninput="onNecesitoFilterInput(this)" value="${necesitoFilter}" />
+      <div class="db-list" id="necesitoListContainer">${buildNecesitoListHtml()}</div>
+    </div>`;
+}
+
+// ============================================================================
+// RENDER — BASE DE DATOS: PERSONAS
+// ============================================================================
+function togglePersonOpen(name) {
+  openPersonName = (openPersonName === name) ? null : name;
+  renderDbPersonas();
+}
+function createNewPerson() {
+  const name = document.getElementById('newPersonName').value.trim();
+  const location = document.getElementById('newPersonLocation').value.trim();
+  if (!name) { alert('Escribe un nombre'); return; }
+  if (state.people[name]) { alert('Ya existe una persona con ese nombre'); return; }
+  state.people[name] = { location, meetPoint: 'Por definir', notas: '', conflicto: null, specialDeal: null, have: {}, need: {} };
+  document.getElementById('newPersonName').value = '';
+  document.getElementById('newPersonLocation').value = '';
+  openPersonName = name;
+  saveDbState();
+  renderAll();
+}
+function removePerson(name) {
+  if (!confirm(`¿Eliminar a ${name}? Esto borra su lista de tengo/necesito y su progreso de intercambio guardado.`)) return;
+  delete state.people[name];
+  for (const id of Object.keys(swaps)) if (id.startsWith(name + '::')) delete swaps[id];
+  for (const id of Object.keys(doySwaps)) if (id.startsWith(name + '::')) delete doySwaps[id];
+  for (const id of Object.keys(extras)) if (id.startsWith(name + '::')) delete extras[id];
+  delete meetInfo[name];
+  [...checked].forEach(id => { if (id.startsWith(name + '::')) checked.delete(id); });
+  if (openPersonName === name) openPersonName = null;
+  saveDbState();
+  saveTrackingState();
+  renderAll();
+}
+function updatePersonField(name, field, value) {
+  state.people[name][field] = value;
+  saveDbState();
+}
+function addPersonHaveBulk(name) {
+  const code = document.getElementById(`haveCode-${cssId(name)}`).value.trim().toUpperCase();
+  const numsStr = document.getElementById(`haveNums-${cssId(name)}`).value;
+  const qty = parseInt(document.getElementById(`haveQty-${cssId(name)}`).value, 10) || 1;
+  const nums = numsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+  if (!code || nums.length === 0) { alert('Completa equipo y al menos un número'); return; }
+  const p = state.people[name];
+  if (!p.have[code]) p.have[code] = {};
+  for (const n of nums) p.have[code][String(n)] = qty;
+  saveDbState();
+  renderAll();
+}
+function removePersonHave(name, code, num) {
+  delete state.people[name].have[code][String(num)];
+  if (Object.keys(state.people[name].have[code]).length === 0) delete state.people[name].have[code];
+  saveDbState();
+  renderAll();
+}
+function addPersonNeedBulk(name) {
+  const code = document.getElementById(`needCode-${cssId(name)}`).value.trim().toUpperCase();
+  const numsStr = document.getElementById(`needNums-${cssId(name)}`).value;
+  const nums = numsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+  if (!code || nums.length === 0) { alert('Completa equipo y al menos un número'); return; }
+  const p = state.people[name];
+  if (!p.need[code]) p.need[code] = [];
+  for (const n of nums) if (!p.need[code].includes(n)) p.need[code].push(n);
+  saveDbState();
+  renderAll();
+}
+function removePersonNeed(name, code, num) {
+  state.people[name].need[code] = state.people[name].need[code].filter(n => n !== num);
+  if (state.people[name].need[code].length === 0) delete state.people[name].need[code];
+  saveDbState();
+  renderAll();
+}
+function cssId(name) {
+  return name.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+function renderDbPersonas() {
+  const el = document.getElementById('db-personas');
+  if (!el) return;
+  let html = `<div class="new-person-form">
+    <input id="newPersonName" placeholder="Nombre de la nueva persona" />
+    <input id="newPersonLocation" placeholder="Ubicación (opcional)" />
+    <button onclick="createNewPerson()">+ Nueva Persona</button>
+  </div>`;
+
+  const names = Object.keys(state.people);
+  if (names.length === 0) html += '<div class="db-empty">Todavía no has agregado a nadie.</div>';
+
+  for (const name of names) {
+    const p = state.people[name];
+    const haveCount = Object.values(p.have).reduce((a, o) => a + Object.keys(o).length, 0);
+    const needCount = Object.values(p.need).reduce((a, arr) => a + arr.length, 0);
+    const isOpen = openPersonName === name;
+    const cid = cssId(name);
+
+    let haveRows = [];
+    for (const code in p.have) for (const numStr in p.have[code]) haveRows.push({ code, num: parseInt(numStr, 10), qty: p.have[code][numStr] });
+    haveRows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+    let needRows = [];
+    for (const code in p.need) for (const num of p.need[code]) needRows.push({ code, num });
+    needRows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+
+    html += `<div class="person-manage-card">
+      <div class="person-manage-head">
+        <div class="info"><div class="name">${name}</div><div class="count">${p.location || '(sin ubicación)'} · Tiene ${haveCount} · Necesita ${needCount}</div></div>
+        <div class="person-manage-actions">
+          <button class="edit" onclick="togglePersonOpen('${name.replace(/'/g, "\\'")}')">${isOpen ? 'Cerrar' : 'Editar'}</button>
+          <button class="del" onclick="removePerson('${name.replace(/'/g, "\\'")}')">Eliminar</button>
+        </div>
+      </div>
+      <div class="person-manage-body ${isOpen ? 'open' : ''}">
+        <div class="person-fields">
+          <input placeholder="Ubicación" value="${(p.location || '').replace(/"/g, '&quot;')}" onchange="updatePersonField('${name.replace(/'/g, "\\'")}','location',this.value)" />
+          <input placeholder="Punto de encuentro" value="${(p.meetPoint || '').replace(/"/g, '&quot;')}" onchange="updatePersonField('${name.replace(/'/g, "\\'")}','meetPoint',this.value)" />
+          <input placeholder="Notas" value="${(p.notas || '').replace(/"/g, '&quot;')}" onchange="updatePersonField('${name.replace(/'/g, "\\'")}','notas',this.value)" />
+        </div>
+        <div class="person-two-col">
+          <div>
+            <h3>Tiene para intercambiar (${haveCount})</h3>
+            <div class="db-add-form">
+              <input class="code" id="haveCode-${cid}" placeholder="Equipo" />
+              <input class="nums" id="haveNums-${cid}" placeholder="Números: 2,5" />
+              <input class="qty" id="haveQty-${cid}" type="number" min="1" value="1" placeholder="Cant." />
+              <button onclick="addPersonHaveBulk('${name.replace(/'/g, "\\'")}')">+ Agregar</button>
+            </div>
+            <div class="db-list">${haveRows.length ? haveRows.map(r => `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)} ${r.qty > 1 ? `x${r.qty}` : ''}</span><button class="del" onclick="removePersonHave('${name.replace(/'/g, "\\'")}','${r.code}',${r.num})">✕</button></div>`).join('') : '<div class="db-empty">Sin datos</div>'}</div>
+          </div>
+          <div>
+            <h3>Necesita (${needCount})</h3>
+            <div class="db-add-form">
+              <input class="code" id="needCode-${cid}" placeholder="Equipo" />
+              <input class="nums" id="needNums-${cid}" placeholder="Números: 2,5" />
+              <button onclick="addPersonNeedBulk('${name.replace(/'/g, "\\'")}')">+ Agregar</button>
+            </div>
+            <div class="db-list">${needRows.length ? needRows.map(r => `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)}</span><button class="del" onclick="removePersonNeed('${name.replace(/'/g, "\\'")}','${r.code}',${r.num})">✕</button></div>`).join('') : '<div class="db-empty">Sin datos</div>'}</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+// ============================================================================
+// RENDER — BASE DE DATOS: VENTAS
+// ============================================================================
+function createSaleBuyer() {
+  const name = document.getElementById('newBuyerName').value.trim();
+  const location = document.getElementById('newBuyerLocation').value.trim();
+  if (!name) { alert('Escribe un nombre'); return; }
+  if (state.sales.find(s => s.buyer === name)) { alert('Ya existe ese comprador'); return; }
+  state.sales.push({ buyer: name, location, meetPoint: location, need: {}, precioAlto: [] });
+  document.getElementById('newBuyerName').value = '';
+  document.getElementById('newBuyerLocation').value = '';
+  saveDbState();
+  renderAll();
+}
+function removeSaleBuyer(name) {
+  if (!confirm(`¿Eliminar comprador ${name}?`)) return;
+  state.sales = state.sales.filter(s => s.buyer !== name);
+  saveDbState();
+  renderAll();
+}
+function addSaleNeedBulk(buyer) {
+  const bid = cssId(buyer);
+  const code = document.getElementById(`saleNeedCode-${bid}`).value.trim().toUpperCase();
+  const numsStr = document.getElementById(`saleNeedNums-${bid}`).value;
+  const nums = numsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+  const sale = state.sales.find(s => s.buyer === buyer);
+  if (!code || nums.length === 0 || !sale) { alert('Completa equipo y al menos un número'); return; }
+  if (!sale.need[code]) sale.need[code] = [];
+  for (const n of nums) if (!sale.need[code].includes(n)) sale.need[code].push(n);
+  saveDbState();
+  renderAll();
+}
+function removeSaleNeed(buyer, code, num) {
+  const sale = state.sales.find(s => s.buyer === buyer);
+  sale.need[code] = sale.need[code].filter(n => n !== num);
+  if (sale.need[code].length === 0) delete sale.need[code];
+  saveDbState();
+  renderAll();
+}
+function toggleSaleAltoPrice(buyer, code, num) {
+  const sale = state.sales.find(s => s.buyer === buyer);
+  const idx = (sale.precioAlto || []).findIndex(([c, n]) => c === code && n === num);
+  if (!sale.precioAlto) sale.precioAlto = [];
+  if (idx >= 0) sale.precioAlto.splice(idx, 1); else sale.precioAlto.push([code, num]);
+  saveDbState();
+  renderAll();
+}
+
+function renderDbVentas() {
+  const el = document.getElementById('db-ventas');
+  if (!el) return;
+  let html = `<div class="db-section">
+    <p class="db-sub">Personas que ya no tienen nada para intercambiar y sólo quieren COMPRAR stickers tuyos.</p>
+    <div class="new-person-form">
+      <input id="newBuyerName" placeholder="Nombre del comprador" />
+      <input id="newBuyerLocation" placeholder="Ubicación (opcional)" />
+      <button onclick="createSaleBuyer()">+ Nuevo Comprador</button>
+    </div>
+  </div>`;
+
+  if (state.sales.length === 0) html += '<div class="db-empty">Sin compradores todavía.</div>';
+
+  for (const sale of state.sales) {
+    const bid = cssId(sale.buyer);
+    let needRows = [];
+    for (const code in sale.need) for (const num of sale.need[code]) needRows.push({ code, num });
+    needRows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+    const matches = computeSaleMatches(sale.buyer);
+
+    html += `<div class="person-manage-card">
+      <div class="person-manage-head">
+        <div class="info"><div class="name">${sale.buyer}</div><div class="count">${sale.location || '(sin ubicación)'} · ${matches.length} disponibles para vender</div></div>
+        <div class="person-manage-actions"><button class="del" onclick="removeSaleBuyer('${sale.buyer.replace(/'/g, "\\'")}')">Eliminar</button></div>
+      </div>
+      <div class="person-manage-body open">
+        <div class="db-add-form">
+          <input class="code" id="saleNeedCode-${bid}" placeholder="Equipo" />
+          <input class="nums" id="saleNeedNums-${bid}" placeholder="Números: 2,5" />
+          <button onclick="addSaleNeedBulk('${sale.buyer.replace(/'/g, "\\'")}')">+ Agregar a su lista</button>
+        </div>
+        <div class="db-list">${needRows.length ? needRows.map(r => {
+          const isAlto = (sale.precioAlto || []).some(([c, n]) => c === r.code && n === r.num);
+          const has = tengoQty(r.code, r.num) > 0;
+          return `<div class="db-row">
+            <span class="code">${stickerDisplay(r.code, r.num)}</span>
+            <span class="label">${categoryLabelOf(r.code, r.num)} ${has ? '✅ lo tienes' : '— no lo tienes'}</span>
+            <label style="font-size:10.5px;display:flex;align-items:center;gap:3px;"><input type="checkbox" ${isAlto ? 'checked' : ''} onchange="toggleSaleAltoPrice('${sale.buyer.replace(/'/g, "\\'")}','${r.code}',${r.num})" /> Precio alto</label>
+            <button class="del" onclick="removeSaleNeed('${sale.buyer.replace(/'/g, "\\'")}','${r.code}',${r.num})">✕</button>
+          </div>`;
+        }).join('') : '<div class="db-empty">Sin datos</div>'}</div>
+      </div>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+// ============================================================================
+// INIT
+// ============================================================================
+document.getElementById('resetBtn').addEventListener('click', async () => {
+  if (confirm('¿Reiniciar todo el progreso de intercambios? Esto desmarca todo, deshace cambios de sticker, quita extras y borra fecha/lugar/hora. NO borra tu base de datos (Tengo/Necesito/Personas).')) {
+    checked = new Set();
+    swaps = {};
+    doySwaps = {};
+    extras = {};
+    meetInfo = {};
+    await saveTrackingState();
+    renderAll();
+  }
+});
+
+loadAll();
+
+</script>
+</body>
+</html>
