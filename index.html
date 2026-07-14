@@ -235,6 +235,14 @@
   .sticker-block { min-width: 0; }
   .sticker-code { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 16px; }
   .sticker-label { font-size: 11.5px; color: var(--muted); margin-top: 1px; line-height: 1.25; }
+  .value-note { color: var(--gold); font-style: italic; }
+  .value-toggle {
+    border: none; background: transparent; cursor: pointer; font-size: 12px;
+    padding: 0 2px; opacity: 0.55; vertical-align: middle;
+  }
+  .value-toggle:hover { opacity: 1; }
+  .value-toggle.active { opacity: 1; filter: drop-shadow(0 0 2px var(--gold)); }
+  .value-toggle:disabled { cursor: not-allowed; opacity: 0.3; }
   .done .sticker-code { text-decoration: line-through; color: var(--muted); }
   .arrow { text-align: center; color: var(--muted); font-size: 15px; padding-top: 2px; }
   .trade-row-header {
@@ -342,6 +350,11 @@
     width: 22px; height: 22px; font-size: 12px; cursor: pointer; flex-shrink: 0;
   }
   .db-row button.del:hover { background: var(--red); color: #fff; }
+  .db-row button.edit-value {
+    background: var(--gold-soft); color: var(--pitch-dark); border: none; border-radius: 50%;
+    width: 22px; height: 22px; font-size: 11px; cursor: pointer; flex-shrink: 0;
+  }
+  .db-row button.edit-value:hover { background: var(--gold); color: #fff; }
   .db-empty { padding: 16px; text-align: center; color: var(--muted); font-size: 13px; }
 
   .person-manage-card { border: 1px solid var(--paper-line); border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
@@ -457,7 +470,10 @@ function categoryOf(code, num) {
 }
 
 function premiumOf(code, num) {
-  return SEED.premium[`${code} ${num}`] || '';
+  return state.premium[`${code} ${num}`] || '';
+}
+function isPremiumLabel(label) {
+  return label.startsWith('Jugador destacado');
 }
 
 function displayTeam(code) {
@@ -652,12 +668,13 @@ function computeSaleMatches(buyer) {
 // ============================================================================
 // ESTADO
 // ============================================================================
-var state = { tengo: {}, necesito: {}, people: {}, sales: [] };
+var state = { tengo: {}, necesito: {}, people: {}, sales: [], premium: {} };
 var checked = new Set();
 var swaps = {};
 var doySwaps = {};
 var extras = {};
 var meetInfo = {};
+var valueOverrides = {};
 var personOrder = [];
 var sortMode = 'chrono';
 var loaded = false;
@@ -733,6 +750,7 @@ async function loadAll() {
       state.necesito = saved.necesito || {};
       state.people = saved.people || {};
       state.sales = saved.sales || [];
+      state.premium = saved.premium || JSON.parse(JSON.stringify(SEED.premium));
     } else {
       throw new Error('sin datos guardados aún');
     }
@@ -741,6 +759,7 @@ async function loadAll() {
     state.necesito = JSON.parse(JSON.stringify(SEED.necesito));
     state.people = JSON.parse(JSON.stringify(SEED.people));
     state.sales = JSON.parse(JSON.stringify(SEED.sales));
+    state.premium = JSON.parse(JSON.stringify(SEED.premium));
     await saveDbState();
   }
 
@@ -770,6 +789,10 @@ async function loadAll() {
     const r = await window.storage.get('panini-tracker-order', false);
     if (r && r.value) personOrder = JSON.parse(r.value);
   } catch (e) {}
+  try {
+    const r = await window.storage.get('panini-tracker-valueoverrides', false);
+    if (r && r.value) valueOverrides = JSON.parse(r.value);
+  } catch (e) {}
 
   loaded = true;
   renderAll();
@@ -778,7 +801,7 @@ async function loadAll() {
 async function saveDbState() {
   try {
     await window.storage.set('panini-db-state', JSON.stringify({
-      tengo: state.tengo, necesito: state.necesito, people: state.people, sales: state.sales,
+      tengo: state.tengo, necesito: state.necesito, people: state.people, sales: state.sales, premium: state.premium,
     }), false);
   } catch (e) { console.error('No se pudo guardar la base de datos', e); }
 }
@@ -790,6 +813,7 @@ async function saveTrackingState() {
     await window.storage.set('panini-tracker-doyswaps', JSON.stringify(doySwaps), false);
     await window.storage.set('panini-tracker-extras', JSON.stringify(extras), false);
     await window.storage.set('panini-tracker-meet', JSON.stringify(meetInfo), false);
+    await window.storage.set('panini-tracker-valueoverrides', JSON.stringify(valueOverrides), false);
     await window.storage.set('panini-tracker-order', JSON.stringify(personOrder), false);
   } catch (e) { console.error('No se pudo guardar el progreso', e); }
 }
@@ -1129,6 +1153,17 @@ function togglePersonCollapse(name) {
   renderTrades();
 }
 
+// Ajuste de valor manual, sólo para un trato puntual (no toca la base de
+// datos): permite mostrar un jugador destacado como si fuera un Jugador
+// normal para negociar ese intercambio específico.
+function toggleValueOverride(pairId, side) {
+  if (!valueOverrides[pairId]) valueOverrides[pairId] = {};
+  valueOverrides[pairId][side] = !valueOverrides[pairId][side];
+  if (!valueOverrides[pairId].recibo && !valueOverrides[pairId].doy) delete valueOverrides[pairId];
+  saveTrackingState();
+  renderTrades();
+}
+
 // ============================================================================
 // RENDER — PÁGINA DE INTERCAMBIOS
 // ============================================================================
@@ -1150,9 +1185,28 @@ function renderTradeRow(item, isSpecial) {
   else if (!isChecked && total > 1) note = `<div class="stock-note">Tienes ${total} disponibles</div>`;
 
   const recibo = isSpecial ? stickerDisplay(item.recibo_code, item.recibo_num) : effectiveRecibo(item);
-  const reciboLabel = isSpecial ? categoryLabelOf(item.recibo_code, item.recibo_num) : effectiveReciboLabel(item);
+  const realReciboLabel = isSpecial ? categoryLabelOf(item.recibo_code, item.recibo_num) : effectiveReciboLabel(item);
   const doy = isSpecial ? stickerDisplay(item.doy_code, item.doy_num) : stickerKey;
-  const doyLabel = isSpecial ? categoryLabelOf(item.doy_code, item.doy_num) : effectiveDoyLabel(item);
+  const realDoyLabel = isSpecial ? categoryLabelOf(item.doy_code, item.doy_num) : effectiveDoyLabel(item);
+
+  const escId = item.id.replace(/'/g, "\\'");
+  const ov = valueOverrides[item.id] || {};
+  const reciboIsPremium = isPremiumLabel(realReciboLabel);
+  const doyIsPremium = isPremiumLabel(realDoyLabel);
+  const reciboAdjusted = reciboIsPremium && ov.recibo;
+  const doyAdjusted = doyIsPremium && ov.doy;
+  const reciboLabel = reciboAdjusted
+    ? `Jugador <span class="value-note">(ajustado para este trato — normalmente: ${realReciboLabel})</span>`
+    : realReciboLabel;
+  const doyLabel = doyAdjusted
+    ? `Jugador <span class="value-note">(ajustado para este trato — normalmente: ${realDoyLabel})</span>`
+    : realDoyLabel;
+  const reciboValueToggle = reciboIsPremium
+    ? `<button type="button" class="value-toggle ${reciboAdjusted ? 'active' : ''}" ${isChecked ? 'disabled' : ''} title="${reciboAdjusted ? 'Restaurar su valor real de jugador destacado' : 'Bajar su valor a Jugador normal solo para este trato'}" onclick="toggleValueOverride('${escId}','recibo')">⚖️</button>`
+    : '';
+  const doyValueToggle = doyIsPremium
+    ? `<button type="button" class="value-toggle ${doyAdjusted ? 'active' : ''}" ${isChecked ? 'disabled' : ''} title="${doyAdjusted ? 'Restaurar su valor real de jugador destacado' : 'Bajar su valor a Jugador normal solo para este trato'}" onclick="toggleValueOverride('${escId}','doy')">⚖️</button>`
+    : '';
 
   let reciboSwapHtml = '', doySwapHtml = '', reciboExtrasHtml = '', doyExtrasHtml = '', reciboAddHtml = '', doyAddHtml = '';
   if (!isSpecial) {
@@ -1214,13 +1268,13 @@ function renderTradeRow(item, isSpecial) {
       <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${item.id.replace(/'/g, "\\'")}')" />
       <div class="sticker-block">
         <div class="sticker-code">${recibo}</div>
-        <div class="sticker-label">${reciboLabel}</div>
+        <div class="sticker-label">${reciboLabel} ${reciboValueToggle}</div>
         ${reciboSwapHtml}${reciboExtrasHtml}${reciboAddHtml}
       </div>
       <div class="arrow">⇄</div>
       <div class="sticker-block">
         <div class="sticker-code">${doy}</div>
-        <div class="sticker-label">${doyLabel}</div>
+        <div class="sticker-label">${doyLabel} ${doyValueToggle}</div>
         ${doySwapHtml}${doyExtrasHtml}${doyAddHtml}
       </div>
       ${note ? `<div class="stock-note-wrap" style="grid-column:1/5">${note}</div>` : ''}
@@ -1396,6 +1450,7 @@ function buildTengoListHtml() {
       <span class="code">${stickerDisplay(r.code, r.num)}</span>
       <span class="label">${categoryLabelOf(r.code, r.num)}</span>
       <input type="number" class="qty-input" min="1" value="${r.qty}" onchange="updateTengoQty('${r.code}',${r.num},this.value)" />
+      <button class="edit-value" title="Editar si es un sticker de valor especial" onclick="editPremium('${r.code}',${r.num})">✎</button>
       <button class="del" onclick="removeTengo('${r.code}',${r.num})">✕</button>
     </div>`).join('');
 }
@@ -1428,6 +1483,7 @@ function buildNecesitoListHtml() {
   return filtered.map(r => `<div class="db-row">
       <span class="code">${stickerDisplay(r.code, r.num)}</span>
       <span class="label">${categoryLabelOf(r.code, r.num)}</span>
+      <button class="edit-value" title="Editar si es un sticker de valor especial" onclick="editPremium('${r.code}',${r.num})">✎</button>
       <button class="del" onclick="removeNecesito('${r.code}',${r.num})">✕</button>
     </div>`).join('');
 }
@@ -1535,6 +1591,24 @@ function updateTengoQty(code, num, qty) {
   qty = parseInt(qty, 10);
   if (isNaN(qty) || qty <= 0) { removeTengo(code, num); return; }
   state.tengo[code][String(num)] = qty;
+  saveDbState();
+  renderAll();
+}
+
+// Edita en la base de datos global si un sticker es un "jugador destacado"
+// (valor especial). Esto cambia su categoría en TODOS los intercambios donde
+// aparezca — para un ajuste puntual dentro de un solo trato, usar el botón
+// ⚖️ en la pestaña Intercambios en su lugar.
+function editPremium(code, num) {
+  const key = `${code} ${num}`;
+  const current = state.premium[key] || '';
+  const input = prompt(
+    `${stickerDisplay(code, num)} — ${current ? `Actualmente es un jugador destacado: "${current}".` : 'Actualmente es un sticker normal.'}\n\nEscribí el nombre del jugador para marcarlo como destacado (valor especial), o dejá vacío para que sea un sticker normal:`,
+    current
+  );
+  if (input === null) return;
+  const trimmed = input.trim();
+  if (trimmed) state.premium[key] = trimmed; else delete state.premium[key];
   saveDbState();
   renderAll();
 }
