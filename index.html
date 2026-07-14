@@ -284,6 +284,12 @@
   .db-section .db-sub { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
 
   .db-filter { width: 100%; padding: 7px 10px; border: 1px solid var(--paper-line); border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 13px; margin-bottom: 10px; }
+  .db-filter-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .db-filter-select {
+    flex: 1; min-width: 150px; padding: 7px 9px; border: 1px solid var(--paper-line); border-radius: 8px;
+    font-family: 'Inter', sans-serif; font-size: 13px; background: #fff;
+  }
+  .db-filter-qty { width: 110px; padding: 7px 9px; border: 1px solid var(--paper-line); border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 13px; }
 
   .db-add-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 8px; padding: 10px; margin-bottom: 12px; }
   .db-add-form input, .db-add-form select {
@@ -499,6 +505,35 @@ function categoryLabelOf(code, num) {
   return cat;
 }
 
+const STICKER_TYPES = {
+  premium: '⭐ Premium (destacado)',
+  holo: '◆ Hologram equipo (#1)',
+  foto: '📷 Foto equipo (#13)',
+  fwc: '🏷️ Especial FWC',
+  jugador: '👤 Jugador',
+};
+function stickerTypeOf(code, num) {
+  if (premiumOf(code, num)) return 'premium';
+  const cat = categoryOf(code, num);
+  if (cat === 'Hologram equipo (#1)') return 'holo';
+  if (cat === 'Foto equipo (#13)') return 'foto';
+  if (cat === 'Especial FWC') return 'fwc';
+  return 'jugador';
+}
+function typeFilterOptionsHtml(selected) {
+  let html = `<option value="">Todos los tipos</option>`;
+  for (const key in STICKER_TYPES) html += `<option value="${key}" ${selected === key ? 'selected' : ''}>${STICKER_TYPES[key]}</option>`;
+  return html;
+}
+function countryFilterOptionsHtml(selected) {
+  let html = `<option value="">Todos los países</option>`;
+  const countries = Object.keys(SEED.teamNames)
+    .filter(c => c !== 'FWC')
+    .sort((a, b) => SEED.teamNames[a].localeCompare(SEED.teamNames[b], 'es'));
+  for (const code of countries) html += `<option value="${code}" ${selected === code ? 'selected' : ''}>${SEED.teamNames[code]} (${code})</option>`;
+  return html;
+}
+
 function tengoQty(code, num) {
   const t = state.tengo[code];
   if (!t) return 0;
@@ -630,6 +665,11 @@ var openPersonName = null;
 var collapsedPeople = new Set();
 var tengoFilter = '';
 var necesitoFilter = '';
+var tengoCountryFilter = '';
+var tengoTypeFilter = '';
+var tengoMinQtyFilter = '';
+var necesitoCountryFilter = '';
+var necesitoTypeFilter = '';
 var pickerTengo = '';
 var pickerNecesito = '';
 var pickerPersonHave = {};
@@ -1337,6 +1377,9 @@ function buildTengoListHtml() {
   }
   rows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
   const filtered = rows.filter(r => {
+    if (tengoCountryFilter && r.code !== tengoCountryFilter) return false;
+    if (tengoTypeFilter && stickerTypeOf(r.code, r.num) !== tengoTypeFilter) return false;
+    if (tengoMinQtyFilter && r.qty < parseInt(tengoMinQtyFilter, 10)) return false;
     if (!tengoFilter) return true;
     const key = stickerDisplay(r.code, r.num).toLowerCase();
     const label = categoryLabelOf(r.code, r.num).toLowerCase();
@@ -1355,6 +1398,8 @@ function buildNecesitoListHtml() {
   for (const code in state.necesito) for (const num of state.necesito[code]) rows.push({ code, num });
   rows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
   const filtered = rows.filter(r => {
+    if (necesitoCountryFilter && r.code !== necesitoCountryFilter) return false;
+    if (necesitoTypeFilter && stickerTypeOf(r.code, r.num) !== necesitoTypeFilter) return false;
     if (!necesitoFilter) return true;
     const key = stickerDisplay(r.code, r.num).toLowerCase();
     const label = categoryLabelOf(r.code, r.num).toLowerCase();
@@ -1371,8 +1416,28 @@ function onTengoFilterInput(el) {
   tengoFilter = el.value;
   document.getElementById('tengoListContainer').innerHTML = buildTengoListHtml();
 }
+function onTengoCountryFilter(el) {
+  tengoCountryFilter = el.value;
+  document.getElementById('tengoListContainer').innerHTML = buildTengoListHtml();
+}
+function onTengoTypeFilter(el) {
+  tengoTypeFilter = el.value;
+  document.getElementById('tengoListContainer').innerHTML = buildTengoListHtml();
+}
+function onTengoMinQtyFilter(el) {
+  tengoMinQtyFilter = el.value;
+  document.getElementById('tengoListContainer').innerHTML = buildTengoListHtml();
+}
 function onNecesitoFilterInput(el) {
   necesitoFilter = el.value;
+  document.getElementById('necesitoListContainer').innerHTML = buildNecesitoListHtml();
+}
+function onNecesitoCountryFilter(el) {
+  necesitoCountryFilter = el.value;
+  document.getElementById('necesitoListContainer').innerHTML = buildNecesitoListHtml();
+}
+function onNecesitoTypeFilter(el) {
+  necesitoTypeFilter = el.value;
   document.getElementById('necesitoListContainer').innerHTML = buildNecesitoListHtml();
 }
 
@@ -1478,6 +1543,11 @@ function renderDbInventario() {
         ${collapseButtonHtml(pickerTengo, 'collapseTengoPicker()')}
       </div>
       <input class="db-filter" placeholder="Buscar (ej: ARG, Holograma, Messi)..." oninput="onTengoFilterInput(this)" value="${tengoFilter}" />
+      <div class="db-filter-row">
+        <select class="db-filter-select" onchange="onTengoCountryFilter(this)">${countryFilterOptionsHtml(tengoCountryFilter)}</select>
+        <select class="db-filter-select" onchange="onTengoTypeFilter(this)">${typeFilterOptionsHtml(tengoTypeFilter)}</select>
+        <input type="number" class="db-filter-qty" min="1" placeholder="Mín. copias" title="Mostrar solo stickers con al menos esta cantidad (útil para encontrar duplicados)" value="${tengoMinQtyFilter}" onchange="onTengoMinQtyFilter(this)" />
+      </div>
       <div class="db-list" id="tengoListContainer">${buildTengoListHtml()}</div>
     </div>
     <div class="db-section">
@@ -1491,6 +1561,10 @@ function renderDbInventario() {
         ${collapseButtonHtml(pickerNecesito, 'collapseNecesitoPicker()')}
       </div>
       <input class="db-filter" placeholder="Buscar..." oninput="onNecesitoFilterInput(this)" value="${necesitoFilter}" />
+      <div class="db-filter-row">
+        <select class="db-filter-select" onchange="onNecesitoCountryFilter(this)">${countryFilterOptionsHtml(necesitoCountryFilter)}</select>
+        <select class="db-filter-select" onchange="onNecesitoTypeFilter(this)">${typeFilterOptionsHtml(necesitoTypeFilter)}</select>
+      </div>
       <div class="db-list" id="necesitoListContainer">${buildNecesitoListHtml()}</div>
     </div>`;
 }
