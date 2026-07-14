@@ -1247,10 +1247,9 @@ function computeSummary() {
 }
 
 function renderTrades() {
-  const { totalTrades, doneTrades, blockedTrades, totalSales, doneSales } = computeSummary();
+  const { totalTrades, doneTrades, blockedTrades } = computeSummary();
   document.getElementById('summaryBar').innerHTML = `
     <div class="pill">✓ <b>${doneTrades}</b>/${totalTrades} intercambios hechos</div>
-    <div class="pill">$ <b>${doneSales}</b>/${totalSales} ventas hechas</div>
     ${blockedTrades > 0 ? `<div class="pill warn">⚠ <b>${blockedTrades}</b> bloqueados por falta de stock</div>` : ''}`;
 
   const sortBarHtml = `<div class="sort-bar">
@@ -1309,26 +1308,7 @@ function renderTrades() {
     peopleHtml += `</div>`;
   }
 
-  let salesHtml = `<div class="person-card"><div class="person-head"><div><div class="person-name">Ventas</div><div class="person-meta">Duplicados vendidos por dinero</div></div><div class="progress-chip">${doneSales}/${totalSales}</div></div>`;
-  for (const s of state.sales) {
-    const buyerKey = `Venta::${s.buyer}`;
-    const meet = meetInfo[buyerKey] || {};
-    const meetPlace = meet.place !== undefined ? meet.place : s.location;
-    const meetDate = meet.date || '';
-    const meetTime = meet.time || '';
-    salesHtml += `<div class="trade-row" style="grid-template-columns:1fr;background:var(--gold-soft);">
-      <div><div class="sticker-code">${s.buyer}</div>
-      <div class="meet-edit-row">
-        <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Fecha</label><input type="date" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetDate}" onchange="updateMeet(this,'date')" /></div>
-        <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Hora</label><input type="time" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetTime}" onchange="updateMeet(this,'time')" /></div>
-        <div class="meet-field place" style="color:var(--ink)"><label style="color:var(--muted)">Lugar</label><input type="text" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" placeholder="Lugar de encuentro" data-person="${buyerKey}" value="${(meetPlace || '').replace(/"/g, '&quot;')}" onchange="updateMeet(this,'place')" /></div>
-      </div></div>
-    </div>`;
-    for (const item of computeSaleMatches(s.buyer)) salesHtml += renderSaleRow(s.buyer, item);
-  }
-  salesHtml += `</div>`;
-
-  document.getElementById('page-trades').innerHTML = sortBarHtml + `<div id="peopleList">${peopleHtml}</div>` + salesHtml;
+  document.getElementById('page-trades').innerHTML = sortBarHtml + `<div id="peopleList">${peopleHtml}</div>`;
   document.getElementById('footerText').innerHTML = 'Marca un intercambio como hecho apenas lo confirmes en persona. Si el mismo sticker tuyo está comprometido en otro trato, ese trato se bloquea automáticamente. Cada lado tiene su propio menú para cambiar de sticker, y un cuadro para sumar stickers extra cuando uno vale más que el otro. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
   initPeopleSortable();
   updateHeaderHeightVar();
@@ -1727,7 +1707,11 @@ function toggleSaleAltoPrice(buyer, code, num) {
 function renderDbVentas() {
   const el = document.getElementById('db-ventas');
   if (!el) return;
-  let html = `<div class="db-section">
+  const { totalSales, doneSales } = computeSummary();
+  let html = `<div class="summary-bar" style="margin-bottom:16px">
+    <div class="pill" style="background:var(--pitch);color:var(--paper)">$ <b>${doneSales}</b>/${totalSales} ventas hechas</div>
+  </div>
+  <div class="db-section">
     <p class="db-sub">Personas que ya no tienen nada para intercambiar y sólo quieren COMPRAR stickers tuyos.</p>
     <div class="new-person-form">
       <input id="newBuyerName" placeholder="Nombre del comprador" />
@@ -1740,17 +1724,31 @@ function renderDbVentas() {
 
   for (const sale of state.sales) {
     const escBuyer = sale.buyer.replace(/'/g, "\\'");
+    const buyerKey = `Venta::${sale.buyer}`;
     let needRows = [];
     for (const code in sale.need) for (const num of sale.need[code]) needRows.push({ code, num });
     needRows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
     const matches = computeSaleMatches(sale.buyer);
+    const doneCount = matches.filter(item => checked.has(`${sale.buyer}::sale::${stickerDisplay(item.code, item.num)}`)).length;
+
+    const meet = meetInfo[buyerKey] || {};
+    const meetPlace = meet.place !== undefined ? meet.place : sale.location;
+    const meetDate = meet.date || '';
+    const meetTime = meet.time || '';
 
     html += `<div class="person-manage-card">
       <div class="person-manage-head">
-        <div class="info"><div class="name">${sale.buyer}</div><div class="count">${sale.location || '(sin ubicación)'} · ${matches.length} disponibles para vender</div></div>
+        <div class="info"><div class="name">${sale.buyer}</div><div class="count">${sale.location || '(sin ubicación)'} · ${doneCount}/${matches.length} vendidos</div></div>
         <div class="person-manage-actions"><button class="del" onclick="removeSaleBuyer('${escBuyer}')">Eliminar</button></div>
       </div>
       <div class="person-manage-body open">
+        <div class="meet-edit-row" style="margin-bottom:14px">
+          <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Fecha</label><input type="date" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetDate}" onchange="updateMeet(this,'date')" /></div>
+          <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Hora</label><input type="time" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetTime}" onchange="updateMeet(this,'time')" /></div>
+          <div class="meet-field place" style="color:var(--ink)"><label style="color:var(--muted)">Lugar</label><input type="text" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" placeholder="Lugar de encuentro" data-person="${buyerKey}" value="${(meetPlace || '').replace(/"/g, '&quot;')}" onchange="updateMeet(this,'place')" /></div>
+        </div>
+        ${matches.length ? `<h3 style="font-family:'Barlow Condensed',sans-serif;font-size:15px;margin:0 0 6px;color:var(--pitch-dark)">Disponibles para vender ahora (${doneCount}/${matches.length})</h3>
+        <div class="db-list" style="margin-bottom:14px">${matches.map(item => renderSaleRow(sale.buyer, item)).join('')}</div>` : ''}
         <div class="team-picker">
           <div class="team-picker-row">
             <select class="team-select" onchange="pickerSaleNeed['${escBuyer}']=this.value; renderDbVentas();">${teamOptionsHtml(pickerSaleNeed[sale.buyer])}</select>
