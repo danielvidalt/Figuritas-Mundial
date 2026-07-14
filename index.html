@@ -350,6 +350,7 @@
   <div class="tabs">
     <button class="tab-btn active" id="tabTradesBtn" onclick="switchTab('trades')">Intercambios</button>
     <button class="tab-btn" id="tabDbBtn" onclick="switchTab('db')">Base de Datos</button>
+    <button class="tab-btn" id="tabVentasBtn" onclick="switchTab('ventas')">Ventas</button>
   </div>
   <div class="summary-bar" id="summaryBar"></div>
 </header>
@@ -364,11 +365,12 @@
     <div class="db-subtabs">
       <button class="db-subtab-btn active" data-sub="inventario" onclick="switchDbSub('inventario')">Mi Inventario</button>
       <button class="db-subtab-btn" data-sub="personas" onclick="switchDbSub('personas')">Personas</button>
-      <button class="db-subtab-btn" data-sub="ventas" onclick="switchDbSub('ventas')">Ventas</button>
     </div>
     <div id="db-inventario" class="db-sub-page"></div>
     <div id="db-personas" class="db-sub-page" style="display:none"></div>
-    <div id="db-ventas" class="db-sub-page" style="display:none"></div>
+  </div>
+  <div class="page" id="page-ventas">
+    <div id="db-ventas"></div>
   </div>
 </main>
 
@@ -786,8 +788,10 @@ function switchTab(tab) {
   currentTab = tab;
   document.getElementById('page-trades').classList.toggle('active', tab === 'trades');
   document.getElementById('page-db').classList.toggle('active', tab === 'db');
+  document.getElementById('page-ventas').classList.toggle('active', tab === 'ventas');
   document.getElementById('tabTradesBtn').classList.toggle('active', tab === 'trades');
   document.getElementById('tabDbBtn').classList.toggle('active', tab === 'db');
+  document.getElementById('tabVentasBtn').classList.toggle('active', tab === 'ventas');
   document.getElementById('summaryBar').style.display = tab === 'trades' ? 'flex' : 'none';
   document.getElementById('footerText').style.display = tab === 'trades' ? 'block' : 'none';
 }
@@ -796,7 +800,6 @@ function switchDbSub(sub) {
   currentDbSub = sub;
   document.getElementById('db-inventario').style.display = sub === 'inventario' ? 'block' : 'none';
   document.getElementById('db-personas').style.display = sub === 'personas' ? 'block' : 'none';
-  document.getElementById('db-ventas').style.display = sub === 'ventas' ? 'block' : 'none';
   document.querySelectorAll('.db-subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.sub === sub));
 }
 
