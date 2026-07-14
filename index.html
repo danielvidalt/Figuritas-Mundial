@@ -131,6 +131,57 @@
     gap: 10px;
     flex-wrap: wrap;
   }
+  .drag-handle {
+    cursor: grab;
+    touch-action: none;
+    color: var(--gold-soft);
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px 6px;
+    margin-right: -4px;
+    user-select: none;
+    order: -1;
+  }
+  .drag-handle:active { cursor: grabbing; }
+  .person-card.sortable-ghost { opacity: 0.35; }
+  .person-card.sortable-drag,
+  .person-card.sortable-fallback { box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
+
+  .sort-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding: 10px 12px;
+    background: #fffdf7;
+    border: 1px solid var(--paper-line);
+    border-radius: var(--card-radius);
+  }
+  .sort-label {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 12.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .sort-btn {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    background: #fff;
+    border: 1px solid var(--paper-line);
+    color: var(--pitch);
+    border-radius: 999px;
+    padding: 5px 12px;
+    cursor: pointer;
+  }
+  .sort-btn.active { background: var(--pitch); color: var(--paper); border-color: var(--pitch); }
+  .drag-hint {
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: auto;
+  }
   .person-name { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 19px; }
   .person-meta { font-size: 12px; color: var(--gold-soft); font-family: 'Barlow Condensed', sans-serif; }
   .progress-chip {
@@ -301,6 +352,7 @@
 <footer id="footerText"></footer>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <script>
 // ============================================================================
 // CONEXIÓN SUPABASE — reemplaza el almacenamiento de artifacts (window.storage)
@@ -516,6 +568,8 @@ var swaps = {};
 var doySwaps = {};
 var extras = {};
 var meetInfo = {};
+var personOrder = [];
+var sortMode = 'chrono';
 var loaded = false;
 var currentTab = 'trades';
 var currentDbSub = 'inventario';
@@ -523,6 +577,7 @@ var openPersonName = null;
 var tengoFilter = '';
 var necesitoFilter = '';
 let _matchCache = {};
+let sortableInstance = null;
 
 function getMatches(personName) {
   if (!_matchCache[personName]) _matchCache[personName] = computePersonMatches(personName);
@@ -572,6 +627,10 @@ async function loadAll() {
     const r = await window.storage.get('panini-tracker-meet', false);
     if (r && r.value) meetInfo = JSON.parse(r.value);
   } catch (e) {}
+  try {
+    const r = await window.storage.get('panini-tracker-order', false);
+    if (r && r.value) personOrder = JSON.parse(r.value);
+  } catch (e) {}
 
   loaded = true;
   renderAll();
@@ -592,7 +651,95 @@ async function saveTrackingState() {
     await window.storage.set('panini-tracker-doyswaps', JSON.stringify(doySwaps), false);
     await window.storage.set('panini-tracker-extras', JSON.stringify(extras), false);
     await window.storage.set('panini-tracker-meet', JSON.stringify(meetInfo), false);
+    await window.storage.set('panini-tracker-order', JSON.stringify(personOrder), false);
   } catch (e) { console.error('No se pudo guardar el progreso', e); }
+}
+
+// ============================================================================
+// ORDEN DE PERSONAS — cronológico por reunión, con filtros alternativos y
+// reordenamiento manual (drag & drop) persistido en `personOrder`.
+// ============================================================================
+function eligiblePeopleNames() {
+  return Object.keys(state.people).filter(name => {
+    const { special, pairs } = getMatches(name);
+    return (special.length + pairs.length) > 0 || !!state.people[name].conflicto;
+  });
+}
+
+function meetTimestamp(name) {
+  const m = meetInfo[name] || {};
+  if (!m.date) return null;
+  const t = new Date(`${m.date}T${m.time || '00:00'}`).getTime();
+  return isNaN(t) ? null : t;
+}
+
+function chronoCompare(a, b) {
+  const ta = meetTimestamp(a), tb = meetTimestamp(b);
+  if (ta === null && tb === null) return a.localeCompare(b);
+  if (ta === null) return 1;
+  if (tb === null) return -1;
+  return ta - tb;
+}
+
+// Sincroniza personOrder con las personas elegibles actuales (agrega nuevas al
+// final, quita las que ya no corresponden). La primera vez (sin orden guardado)
+// arranca en orden cronológico.
+function syncPersonOrder() {
+  const eligible = eligiblePeopleNames();
+  const wasEmpty = personOrder.length === 0;
+  const kept = personOrder.filter(n => eligible.includes(n));
+  const added = eligible.filter(n => !kept.includes(n));
+  let result = [...kept, ...added];
+  if (wasEmpty) result = result.slice().sort(chronoCompare);
+  personOrder = result;
+  return personOrder;
+}
+
+function sortChronological() {
+  const names = syncPersonOrder().slice().sort(chronoCompare);
+  personOrder = names;
+  sortMode = 'chrono';
+  saveTrackingState();
+  renderTrades();
+}
+
+function sortByLocation() {
+  const names = syncPersonOrder().slice().sort((a, b) =>
+    (state.people[a].location || '').localeCompare(state.people[b].location || ''));
+  personOrder = names;
+  sortMode = 'location';
+  saveTrackingState();
+  renderTrades();
+}
+
+function sortByTradeCount() {
+  const names = syncPersonOrder().slice().sort((a, b) => {
+    const ma = getMatches(a), mb = getMatches(b);
+    return (mb.special.length + mb.pairs.length) - (ma.special.length + ma.pairs.length);
+  });
+  personOrder = names;
+  sortMode = 'count';
+  saveTrackingState();
+  renderTrades();
+}
+
+function initPeopleSortable() {
+  const el = document.getElementById('peopleList');
+  if (!el || typeof Sortable === 'undefined') return;
+  if (sortableInstance) { sortableInstance.destroy(); sortableInstance = null; }
+  sortableInstance = new Sortable(el, {
+    handle: '.drag-handle',
+    animation: 150,
+    draggable: '.person-card',
+    forceFallback: true,
+    fallbackTolerance: 3,
+    onEnd: function () {
+      personOrder = Array.from(el.children).map(child => child.dataset.personName);
+      sortMode = 'manual';
+      saveTrackingState();
+      document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+    },
+  });
 }
 
 function renderAll() {
@@ -1002,12 +1149,19 @@ function renderTrades() {
     <div class="pill">$ <b>${doneSales}</b>/${totalSales} ventas hechas</div>
     ${blockedTrades > 0 ? `<div class="pill warn">⚠ <b>${blockedTrades}</b> bloqueados por falta de stock</div>` : ''}`;
 
-  let html = '';
-  for (const name of Object.keys(state.people)) {
+  const sortBarHtml = `<div class="sort-bar">
+    <span class="sort-label">Ordenar por:</span>
+    <button class="sort-btn ${sortMode === 'chrono' ? 'active' : ''}" onclick="sortChronological()">📅 Cronológico</button>
+    <button class="sort-btn ${sortMode === 'location' ? 'active' : ''}" onclick="sortByLocation()">📍 Ubicación</button>
+    <button class="sort-btn ${sortMode === 'count' ? 'active' : ''}" onclick="sortByTradeCount()">🔁 Cantidad</button>
+    <span class="drag-hint">↕ Arrastrá el encabezado de una tarjeta para reordenar a mano</span>
+  </div>`;
+
+  let peopleHtml = '';
+  for (const name of syncPersonOrder()) {
     const person = state.people[name];
     const { special, pairs } = getMatches(name);
     const total = special.length + pairs.length;
-    if (total === 0 && !person.conflicto) continue;
     let done = 0;
     for (const s of special) if (checked.has(s.id)) done++;
     for (const pr of pairs) if (checked.has(pr.id)) done++;
@@ -1017,8 +1171,9 @@ function renderTrades() {
     const meetDate = meet.date || '';
     const meetTime = meet.time || '';
 
-    html += `<div class="person-card">
+    peopleHtml += `<div class="person-card" data-person-name="${name.replace(/"/g, '&quot;')}">
       <div class="person-head">
+        <div class="drag-handle" title="Arrastrar para reordenar">⠿</div>
         <div><div class="person-name">${name}</div><div class="person-meta">${person.location}</div></div>
         <div class="progress-chip">${done}/${total}</div>
         <div class="meet-edit-row">
@@ -1028,22 +1183,22 @@ function renderTrades() {
         </div>
       </div>`;
     if (person.conflicto) {
-      html += `<div style="padding:10px 16px 0"><div style="font-weight:700;font-size:11px;color:#C00000;font-family:'Barlow Condensed',sans-serif">⏸️ AVISO</div>
+      peopleHtml += `<div style="padding:10px 16px 0"><div style="font-weight:700;font-size:11px;color:#C00000;font-family:'Barlow Condensed',sans-serif">⏸️ AVISO</div>
         <div style="font-size:12.5px;padding:4px 0 10px">${person.conflicto}</div></div>`;
     }
-    for (const s of special) html += renderTradeRow(s, true);
-    for (const pr of pairs) html += renderTradeRow(pr, false);
-    html += `</div>`;
+    for (const s of special) peopleHtml += renderTradeRow(s, true);
+    for (const pr of pairs) peopleHtml += renderTradeRow(pr, false);
+    peopleHtml += `</div>`;
   }
 
-  html += `<div class="person-card"><div class="person-head"><div><div class="person-name">Ventas</div><div class="person-meta">Duplicados vendidos por dinero</div></div><div class="progress-chip">${doneSales}/${totalSales}</div></div>`;
+  let salesHtml = `<div class="person-card"><div class="person-head"><div><div class="person-name">Ventas</div><div class="person-meta">Duplicados vendidos por dinero</div></div><div class="progress-chip">${doneSales}/${totalSales}</div></div>`;
   for (const s of state.sales) {
     const buyerKey = `Venta::${s.buyer}`;
     const meet = meetInfo[buyerKey] || {};
     const meetPlace = meet.place !== undefined ? meet.place : s.location;
     const meetDate = meet.date || '';
     const meetTime = meet.time || '';
-    html += `<div class="trade-row" style="grid-template-columns:1fr;background:var(--gold-soft);">
+    salesHtml += `<div class="trade-row" style="grid-template-columns:1fr;background:var(--gold-soft);">
       <div><div class="sticker-code">${s.buyer}</div>
       <div class="meet-edit-row">
         <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Fecha</label><input type="date" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetDate}" onchange="updateMeet(this,'date')" /></div>
@@ -1051,12 +1206,13 @@ function renderTrades() {
         <div class="meet-field place" style="color:var(--ink)"><label style="color:var(--muted)">Lugar</label><input type="text" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" placeholder="Lugar de encuentro" data-person="${buyerKey}" value="${(meetPlace || '').replace(/"/g, '&quot;')}" onchange="updateMeet(this,'place')" /></div>
       </div></div>
     </div>`;
-    for (const item of computeSaleMatches(s.buyer)) html += renderSaleRow(s.buyer, item);
+    for (const item of computeSaleMatches(s.buyer)) salesHtml += renderSaleRow(s.buyer, item);
   }
-  html += `</div>`;
+  salesHtml += `</div>`;
 
-  document.getElementById('page-trades').innerHTML = html;
+  document.getElementById('page-trades').innerHTML = sortBarHtml + `<div id="peopleList">${peopleHtml}</div>` + salesHtml;
   document.getElementById('footerText').innerHTML = 'Marca un intercambio como hecho apenas lo confirmes en persona. Si el mismo sticker tuyo está comprometido en otro trato, ese trato se bloquea automáticamente. Cada lado tiene su propio menú para cambiar de sticker, y un cuadro para sumar stickers extra cuando uno vale más que el otro. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
+  initPeopleSortable();
 }
 
 // ============================================================================
