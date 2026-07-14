@@ -290,6 +290,8 @@
     font-family: 'Inter', sans-serif; font-size: 13px; background: #fff;
   }
   .db-filter-qty { width: 110px; padding: 7px 9px; border: 1px solid var(--paper-line); border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 13px; }
+  .db-subtotal { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+  .db-subtotal b { color: var(--pitch-dark); }
 
   .db-add-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 8px; padding: 10px; margin-bottom: 12px; }
   .db-add-form input, .db-add-form select {
@@ -1367,16 +1369,16 @@ window.addEventListener('resize', updateHeaderHeightVar);
 // ============================================================================
 // RENDER — BASE DE DATOS: MI INVENTARIO
 // ============================================================================
-function buildTengoListHtml() {
-  const rows = [];
+function tengoFilteredRows() {
+  const all = [];
   for (const code in state.tengo) {
     for (const numStr in state.tengo[code]) {
       const num = parseInt(numStr, 10);
-      rows.push({ code, num, qty: state.tengo[code][numStr] });
+      all.push({ code, num, qty: state.tengo[code][numStr] });
     }
   }
-  rows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
-  const filtered = rows.filter(r => {
+  all.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+  const filtered = all.filter(r => {
     if (tengoCountryFilter && r.code !== tengoCountryFilter) return false;
     if (tengoTypeFilter && stickerTypeOf(r.code, r.num) !== tengoTypeFilter) return false;
     if (tengoMinQtyFilter && r.qty < parseInt(tengoMinQtyFilter, 10)) return false;
@@ -1385,6 +1387,10 @@ function buildTengoListHtml() {
     const label = categoryLabelOf(r.code, r.num).toLowerCase();
     return key.includes(tengoFilter.toLowerCase()) || label.includes(tengoFilter.toLowerCase());
   });
+  return { all, filtered };
+}
+function buildTengoListHtml() {
+  const { filtered } = tengoFilteredRows();
   if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
   return filtered.map(r => `<div class="db-row">
       <span class="code">${stickerDisplay(r.code, r.num)}</span>
@@ -1393,11 +1399,20 @@ function buildTengoListHtml() {
       <button class="del" onclick="removeTengo('${r.code}',${r.num})">✕</button>
     </div>`).join('');
 }
-function buildNecesitoListHtml() {
-  const rows = [];
-  for (const code in state.necesito) for (const num of state.necesito[code]) rows.push({ code, num });
-  rows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
-  const filtered = rows.filter(r => {
+function buildTengoSubtotalHtml() {
+  const { all, filtered } = tengoFilteredRows();
+  const totalCopies = all.reduce((a, r) => a + r.qty, 0);
+  const filteredCopies = filtered.reduce((a, r) => a + r.qty, 0);
+  if (filtered.length === all.length) {
+    return `<div class="db-subtotal"><b>${all.length}</b> stickers únicos · <b>${totalCopies}</b> copias en total</div>`;
+  }
+  return `<div class="db-subtotal">Mostrando <b>${filtered.length}</b> de <b>${all.length}</b> stickers únicos (<b>${filteredCopies}</b> copias) — de un total de <b>${totalCopies}</b> copias</div>`;
+}
+function necesitoFilteredRows() {
+  const all = [];
+  for (const code in state.necesito) for (const num of state.necesito[code]) all.push({ code, num });
+  all.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+  const filtered = all.filter(r => {
     if (necesitoCountryFilter && r.code !== necesitoCountryFilter) return false;
     if (necesitoTypeFilter && stickerTypeOf(r.code, r.num) !== necesitoTypeFilter) return false;
     if (!necesitoFilter) return true;
@@ -1405,6 +1420,10 @@ function buildNecesitoListHtml() {
     const label = categoryLabelOf(r.code, r.num).toLowerCase();
     return key.includes(necesitoFilter.toLowerCase()) || label.includes(necesitoFilter.toLowerCase());
   });
+  return { all, filtered };
+}
+function buildNecesitoListHtml() {
+  const { filtered } = necesitoFilteredRows();
   if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
   return filtered.map(r => `<div class="db-row">
       <span class="code">${stickerDisplay(r.code, r.num)}</span>
@@ -1412,33 +1431,46 @@ function buildNecesitoListHtml() {
       <button class="del" onclick="removeNecesito('${r.code}',${r.num})">✕</button>
     </div>`).join('');
 }
+function buildNecesitoSubtotalHtml() {
+  const { all, filtered } = necesitoFilteredRows();
+  if (filtered.length === all.length) return `<div class="db-subtotal"><b>${all.length}</b> stickers en total</div>`;
+  return `<div class="db-subtotal">Mostrando <b>${filtered.length}</b> de <b>${all.length}</b> stickers</div>`;
+}
+function refreshTengoList() {
+  document.getElementById('tengoSubtotal').innerHTML = buildTengoSubtotalHtml();
+  document.getElementById('tengoListContainer').innerHTML = buildTengoListHtml();
+}
+function refreshNecesitoList() {
+  document.getElementById('necesitoSubtotal').innerHTML = buildNecesitoSubtotalHtml();
+  document.getElementById('necesitoListContainer').innerHTML = buildNecesitoListHtml();
+}
 function onTengoFilterInput(el) {
   tengoFilter = el.value;
-  document.getElementById('tengoListContainer').innerHTML = buildTengoListHtml();
+  refreshTengoList();
 }
 function onTengoCountryFilter(el) {
   tengoCountryFilter = el.value;
-  document.getElementById('tengoListContainer').innerHTML = buildTengoListHtml();
+  refreshTengoList();
 }
 function onTengoTypeFilter(el) {
   tengoTypeFilter = el.value;
-  document.getElementById('tengoListContainer').innerHTML = buildTengoListHtml();
+  refreshTengoList();
 }
 function onTengoMinQtyFilter(el) {
   tengoMinQtyFilter = el.value;
-  document.getElementById('tengoListContainer').innerHTML = buildTengoListHtml();
+  refreshTengoList();
 }
 function onNecesitoFilterInput(el) {
   necesitoFilter = el.value;
-  document.getElementById('necesitoListContainer').innerHTML = buildNecesitoListHtml();
+  refreshNecesitoList();
 }
 function onNecesitoCountryFilter(el) {
   necesitoCountryFilter = el.value;
-  document.getElementById('necesitoListContainer').innerHTML = buildNecesitoListHtml();
+  refreshNecesitoList();
 }
 function onNecesitoTypeFilter(el) {
   necesitoTypeFilter = el.value;
-  document.getElementById('necesitoListContainer').innerHTML = buildNecesitoListHtml();
+  refreshNecesitoList();
 }
 
 // ============================================================================
@@ -1548,6 +1580,7 @@ function renderDbInventario() {
         <select class="db-filter-select" onchange="onTengoTypeFilter(this)">${typeFilterOptionsHtml(tengoTypeFilter)}</select>
         <input type="number" class="db-filter-qty" min="1" placeholder="Mín. copias" title="Mostrar solo stickers con al menos esta cantidad (útil para encontrar duplicados)" value="${tengoMinQtyFilter}" onchange="onTengoMinQtyFilter(this)" />
       </div>
+      <div id="tengoSubtotal">${buildTengoSubtotalHtml()}</div>
       <div class="db-list" id="tengoListContainer">${buildTengoListHtml()}</div>
     </div>
     <div class="db-section">
@@ -1565,6 +1598,7 @@ function renderDbInventario() {
         <select class="db-filter-select" onchange="onNecesitoCountryFilter(this)">${countryFilterOptionsHtml(necesitoCountryFilter)}</select>
         <select class="db-filter-select" onchange="onNecesitoTypeFilter(this)">${typeFilterOptionsHtml(necesitoTypeFilter)}</select>
       </div>
+      <div id="necesitoSubtotal">${buildNecesitoSubtotalHtml()}</div>
       <div class="db-list" id="necesitoListContainer">${buildNecesitoListHtml()}</div>
     </div>`;
 }
