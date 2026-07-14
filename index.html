@@ -271,6 +271,23 @@
   .db-add-form button:hover { background: var(--pitch-dark); }
   .db-add-form .hint { font-size: 10.5px; color: var(--muted); flex-basis: 100%; }
 
+  .team-picker { background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 8px; padding: 10px; margin-bottom: 12px; }
+  .team-picker-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  .team-select {
+    font-family: 'Inter', sans-serif; font-size: 13px; padding: 7px 9px;
+    border: 1px solid var(--paper-line); border-radius: 6px; flex: 1; min-width: 200px;
+  }
+  .team-picker .qty { width: 70px; font-family: 'Inter', sans-serif; font-size: 13px; padding: 7px 8px; border: 1px solid var(--paper-line); border-radius: 6px; }
+  .num-grid { display: flex; flex-wrap: wrap; gap: 5px; }
+  .num-btn {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px;
+    min-width: 38px; height: 34px; padding: 0 4px; border-radius: 6px;
+    border: 1px solid var(--paper-line); background: #fff; color: var(--pitch); cursor: pointer;
+  }
+  .num-btn:hover { border-color: var(--pitch); }
+  .num-btn.active { background: var(--green-check); border-color: var(--green-check); color: #fff; }
+  .picker-hint { font-size: 12px; color: var(--muted); margin: 0; }
+
   .db-list { max-height: 420px; overflow-y: auto; border: 1px solid var(--paper-line); border-radius: 8px; }
   .db-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--paper-line); font-size: 12.5px; }
   .db-row:last-child { border-bottom: none; }
@@ -576,6 +593,11 @@ var currentDbSub = 'inventario';
 var openPersonName = null;
 var tengoFilter = '';
 var necesitoFilter = '';
+var pickerTengo = '';
+var pickerNecesito = '';
+var pickerPersonHave = {};
+var pickerPersonNeed = {};
+var pickerSaleNeed = {};
 let _matchCache = {};
 let sortableInstance = null;
 
@@ -1267,17 +1289,50 @@ function onNecesitoFilterInput(el) {
   document.getElementById('necesitoListContainer').innerHTML = buildNecesitoListHtml();
 }
 
-function addTengoBulk() {
-  const code = document.getElementById('tengoAddCode').value.trim().toUpperCase();
-  const numsStr = document.getElementById('tengoAddNums').value;
-  const qty = parseInt(document.getElementById('tengoAddQty').value, 10) || 1;
-  const nums = numsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
-  if (!code || nums.length === 0) { alert('Completa equipo y al menos un número'); return; }
+// ============================================================================
+// SELECTOR DE EQUIPO + GRILLA DE NÚMEROS — reemplaza la carga manual de
+// "código + números separados por coma" por una selección con clics.
+// ============================================================================
+function teamOptionsHtml(selectedCode) {
+  let html = `<option value="" ${!selectedCode ? 'selected' : ''}>— Elegí un equipo —</option>`;
+  html += `<optgroup label="FWC — Especiales">`;
+  for (const code of Object.keys(SEED.fwcLabels)) {
+    html += `<option value="${code}" ${selectedCode === code ? 'selected' : ''}>${SEED.fwcSubtypeLabel[code] || SEED.fwcLabels[code]}</option>`;
+  }
+  html += `</optgroup><optgroup label="Selecciones">`;
+  const countries = Object.keys(SEED.teamNames)
+    .filter(c => c !== 'FWC')
+    .sort((a, b) => SEED.teamNames[a].localeCompare(SEED.teamNames[b], 'es'));
+  for (const code of countries) {
+    html += `<option value="${code}" ${selectedCode === code ? 'selected' : ''}>${SEED.teamNames[code]} (${code})</option>`;
+  }
+  html += `</optgroup>`;
+  return html;
+}
+function numberGridHtml(code, activeNums, makeOnclick) {
+  if (!code) return `<p class="picker-hint">Elegí un equipo arriba para ver sus números.</p>`;
+  const isFwc = code.startsWith('FWC');
+  const start = isFwc ? 0 : 1, end = isFwc ? 19 : 20;
+  let html = '<div class="num-grid">';
+  for (let n = start; n <= end; n++) {
+    const active = activeNums.has(n);
+    const label = isFwc ? String(n).padStart(2, '0') : String(n);
+    html += `<button type="button" class="num-btn ${active ? 'active' : ''}" onclick="${makeOnclick(n)}">${label}</button>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function toggleTengoNum(code, num) {
   if (!state.tengo[code]) state.tengo[code] = {};
-  for (const n of nums) state.tengo[code][String(n)] = qty;
-  document.getElementById('tengoAddCode').value = '';
-  document.getElementById('tengoAddNums').value = '';
-  document.getElementById('tengoAddQty').value = '1';
+  const key = String(num);
+  if (state.tengo[code][key]) {
+    delete state.tengo[code][key];
+    if (Object.keys(state.tengo[code]).length === 0) delete state.tengo[code];
+  } else {
+    const qty = parseInt(document.getElementById('tengoPickQty')?.value, 10) || 1;
+    state.tengo[code][key] = qty;
+  }
   saveDbState();
   renderAll();
 }
@@ -1294,15 +1349,15 @@ function updateTengoQty(code, num, qty) {
   saveDbState();
   renderAll();
 }
-function addNecesitoBulk() {
-  const code = document.getElementById('necesitoAddCode').value.trim().toUpperCase();
-  const numsStr = document.getElementById('necesitoAddNums').value;
-  const nums = numsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
-  if (!code || nums.length === 0) { alert('Completa equipo y al menos un número'); return; }
+function toggleNecesitoNum(code, num) {
   if (!state.necesito[code]) state.necesito[code] = [];
-  for (const n of nums) if (!state.necesito[code].includes(n)) state.necesito[code].push(n);
-  document.getElementById('necesitoAddCode').value = '';
-  document.getElementById('necesitoAddNums').value = '';
+  const idx = state.necesito[code].indexOf(num);
+  if (idx >= 0) {
+    state.necesito[code].splice(idx, 1);
+    if (state.necesito[code].length === 0) delete state.necesito[code];
+  } else {
+    state.necesito[code].push(num);
+  }
   saveDbState();
   renderAll();
 }
@@ -1321,24 +1376,25 @@ function renderDbInventario() {
   el.innerHTML = `
     <div class="db-section">
       <h2>Tengo para intercambiar <span style="color:var(--muted);font-size:13px">(${tengoCount})</span></h2>
-      <p class="db-sub">Stickers que tienes disponibles para dar. La cantidad indica cuántas copias tienes de ese sticker.</p>
-      <div class="db-add-form">
-        <input class="code" id="tengoAddCode" placeholder="Equipo (ARG)" />
-        <input class="nums" id="tengoAddNums" placeholder="Números: 1,5,13" />
-        <input class="qty" id="tengoAddQty" type="number" min="1" value="1" placeholder="Cant." />
-        <button onclick="addTengoBulk()">+ Agregar</button>
-        <div class="hint">Código de 3 letras (ARG, POR, FWC_trofeo, FWC_mundo, FWC_pergamino) + números separados por coma.</div>
+      <p class="db-sub">Stickers que tienes disponibles para dar. Elegí el equipo y tocá los números que tenés — tocá de nuevo para quitarlos.</p>
+      <div class="team-picker">
+        <div class="team-picker-row">
+          <select class="team-select" onchange="pickerTengo=this.value; renderDbInventario();">${teamOptionsHtml(pickerTengo)}</select>
+          <input type="number" class="qty" id="tengoPickQty" min="1" value="1" placeholder="Cant." title="Cantidad para stickers nuevos" />
+        </div>
+        ${numberGridHtml(pickerTengo, new Set(Object.keys(state.tengo[pickerTengo] || {}).map(Number)), n => `toggleTengoNum('${pickerTengo}',${n})`)}
       </div>
       <input class="db-filter" placeholder="Buscar (ej: ARG, Holograma, Messi)..." oninput="onTengoFilterInput(this)" value="${tengoFilter}" />
       <div class="db-list" id="tengoListContainer">${buildTengoListHtml()}</div>
     </div>
     <div class="db-section">
       <h2>Necesito <span style="color:var(--muted);font-size:13px">(${necesitoCount})</span></h2>
-      <p class="db-sub">Stickers que te faltan para completar el álbum.</p>
-      <div class="db-add-form">
-        <input class="code" id="necesitoAddCode" placeholder="Equipo (ARG)" />
-        <input class="nums" id="necesitoAddNums" placeholder="Números: 1,5,13" />
-        <button onclick="addNecesitoBulk()">+ Agregar</button>
+      <p class="db-sub">Stickers que te faltan para completar el álbum. Tocá un número para marcarlo, tocá de nuevo para quitarlo.</p>
+      <div class="team-picker">
+        <div class="team-picker-row">
+          <select class="team-select" onchange="pickerNecesito=this.value; renderDbInventario();">${teamOptionsHtml(pickerNecesito)}</select>
+        </div>
+        ${numberGridHtml(pickerNecesito, new Set(state.necesito[pickerNecesito] || []), n => `toggleNecesitoNum('${pickerNecesito}',${n})`)}
       </div>
       <input class="db-filter" placeholder="Buscar..." oninput="onNecesitoFilterInput(this)" value="${necesitoFilter}" />
       <div class="db-list" id="necesitoListContainer">${buildNecesitoListHtml()}</div>
@@ -1381,15 +1437,17 @@ function updatePersonField(name, field, value) {
   state.people[name][field] = value;
   saveDbState();
 }
-function addPersonHaveBulk(name) {
-  const code = document.getElementById(`haveCode-${cssId(name)}`).value.trim().toUpperCase();
-  const numsStr = document.getElementById(`haveNums-${cssId(name)}`).value;
-  const qty = parseInt(document.getElementById(`haveQty-${cssId(name)}`).value, 10) || 1;
-  const nums = numsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
-  if (!code || nums.length === 0) { alert('Completa equipo y al menos un número'); return; }
+function togglePersonHaveNum(name, code, num) {
   const p = state.people[name];
   if (!p.have[code]) p.have[code] = {};
-  for (const n of nums) p.have[code][String(n)] = qty;
+  const key = String(num);
+  if (p.have[code][key]) {
+    delete p.have[code][key];
+    if (Object.keys(p.have[code]).length === 0) delete p.have[code];
+  } else {
+    const qty = parseInt(document.getElementById(`havePickQty-${cssId(name)}`)?.value, 10) || 1;
+    p.have[code][key] = qty;
+  }
   saveDbState();
   renderAll();
 }
@@ -1399,14 +1457,16 @@ function removePersonHave(name, code, num) {
   saveDbState();
   renderAll();
 }
-function addPersonNeedBulk(name) {
-  const code = document.getElementById(`needCode-${cssId(name)}`).value.trim().toUpperCase();
-  const numsStr = document.getElementById(`needNums-${cssId(name)}`).value;
-  const nums = numsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
-  if (!code || nums.length === 0) { alert('Completa equipo y al menos un número'); return; }
+function togglePersonNeedNum(name, code, num) {
   const p = state.people[name];
   if (!p.need[code]) p.need[code] = [];
-  for (const n of nums) if (!p.need[code].includes(n)) p.need[code].push(n);
+  const idx = p.need[code].indexOf(num);
+  if (idx >= 0) {
+    p.need[code].splice(idx, 1);
+    if (p.need[code].length === 0) delete p.need[code];
+  } else {
+    p.need[code].push(num);
+  }
   saveDbState();
   renderAll();
 }
@@ -1438,6 +1498,7 @@ function renderDbPersonas() {
     const needCount = Object.values(p.need).reduce((a, arr) => a + arr.length, 0);
     const isOpen = openPersonName === name;
     const cid = cssId(name);
+    const escName = name.replace(/'/g, "\\'");
 
     let haveRows = [];
     for (const code in p.have) for (const numStr in p.have[code]) haveRows.push({ code, num: parseInt(numStr, 10), qty: p.have[code][numStr] });
@@ -1463,22 +1524,24 @@ function renderDbPersonas() {
         <div class="person-two-col">
           <div>
             <h3>Tiene para intercambiar (${haveCount})</h3>
-            <div class="db-add-form">
-              <input class="code" id="haveCode-${cid}" placeholder="Equipo" />
-              <input class="nums" id="haveNums-${cid}" placeholder="Números: 2,5" />
-              <input class="qty" id="haveQty-${cid}" type="number" min="1" value="1" placeholder="Cant." />
-              <button onclick="addPersonHaveBulk('${name.replace(/'/g, "\\'")}')">+ Agregar</button>
+            <div class="team-picker">
+              <div class="team-picker-row">
+                <select class="team-select" onchange="pickerPersonHave['${escName}']=this.value; renderDbPersonas();">${teamOptionsHtml(pickerPersonHave[name])}</select>
+                <input type="number" class="qty" id="havePickQty-${cid}" min="1" value="1" placeholder="Cant." />
+              </div>
+              ${numberGridHtml(pickerPersonHave[name], new Set(Object.keys(p.have[pickerPersonHave[name]] || {}).map(Number)), n => `togglePersonHaveNum('${escName}','${pickerPersonHave[name]}',${n})`)}
             </div>
-            <div class="db-list">${haveRows.length ? haveRows.map(r => `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)} ${r.qty > 1 ? `x${r.qty}` : ''}</span><button class="del" onclick="removePersonHave('${name.replace(/'/g, "\\'")}','${r.code}',${r.num})">✕</button></div>`).join('') : '<div class="db-empty">Sin datos</div>'}</div>
+            <div class="db-list">${haveRows.length ? haveRows.map(r => `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)} ${r.qty > 1 ? `x${r.qty}` : ''}</span><button class="del" onclick="removePersonHave('${escName}','${r.code}',${r.num})">✕</button></div>`).join('') : '<div class="db-empty">Sin datos</div>'}</div>
           </div>
           <div>
             <h3>Necesita (${needCount})</h3>
-            <div class="db-add-form">
-              <input class="code" id="needCode-${cid}" placeholder="Equipo" />
-              <input class="nums" id="needNums-${cid}" placeholder="Números: 2,5" />
-              <button onclick="addPersonNeedBulk('${name.replace(/'/g, "\\'")}')">+ Agregar</button>
+            <div class="team-picker">
+              <div class="team-picker-row">
+                <select class="team-select" onchange="pickerPersonNeed['${escName}']=this.value; renderDbPersonas();">${teamOptionsHtml(pickerPersonNeed[name])}</select>
+              </div>
+              ${numberGridHtml(pickerPersonNeed[name], new Set(p.need[pickerPersonNeed[name]] || []), n => `togglePersonNeedNum('${escName}','${pickerPersonNeed[name]}',${n})`)}
             </div>
-            <div class="db-list">${needRows.length ? needRows.map(r => `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)}</span><button class="del" onclick="removePersonNeed('${name.replace(/'/g, "\\'")}','${r.code}',${r.num})">✕</button></div>`).join('') : '<div class="db-empty">Sin datos</div>'}</div>
+            <div class="db-list">${needRows.length ? needRows.map(r => `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)}</span><button class="del" onclick="removePersonNeed('${escName}','${r.code}',${r.num})">✕</button></div>`).join('') : '<div class="db-empty">Sin datos</div>'}</div>
           </div>
         </div>
       </div>
@@ -1507,15 +1570,16 @@ function removeSaleBuyer(name) {
   saveDbState();
   renderAll();
 }
-function addSaleNeedBulk(buyer) {
-  const bid = cssId(buyer);
-  const code = document.getElementById(`saleNeedCode-${bid}`).value.trim().toUpperCase();
-  const numsStr = document.getElementById(`saleNeedNums-${bid}`).value;
-  const nums = numsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+function toggleSaleNeedNum(buyer, code, num) {
   const sale = state.sales.find(s => s.buyer === buyer);
-  if (!code || nums.length === 0 || !sale) { alert('Completa equipo y al menos un número'); return; }
   if (!sale.need[code]) sale.need[code] = [];
-  for (const n of nums) if (!sale.need[code].includes(n)) sale.need[code].push(n);
+  const idx = sale.need[code].indexOf(num);
+  if (idx >= 0) {
+    sale.need[code].splice(idx, 1);
+    if (sale.need[code].length === 0) delete sale.need[code];
+  } else {
+    sale.need[code].push(num);
+  }
   saveDbState();
   renderAll();
 }
@@ -1550,7 +1614,7 @@ function renderDbVentas() {
   if (state.sales.length === 0) html += '<div class="db-empty">Sin compradores todavía.</div>';
 
   for (const sale of state.sales) {
-    const bid = cssId(sale.buyer);
+    const escBuyer = sale.buyer.replace(/'/g, "\\'");
     let needRows = [];
     for (const code in sale.need) for (const num of sale.need[code]) needRows.push({ code, num });
     needRows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
@@ -1559,13 +1623,14 @@ function renderDbVentas() {
     html += `<div class="person-manage-card">
       <div class="person-manage-head">
         <div class="info"><div class="name">${sale.buyer}</div><div class="count">${sale.location || '(sin ubicación)'} · ${matches.length} disponibles para vender</div></div>
-        <div class="person-manage-actions"><button class="del" onclick="removeSaleBuyer('${sale.buyer.replace(/'/g, "\\'")}')">Eliminar</button></div>
+        <div class="person-manage-actions"><button class="del" onclick="removeSaleBuyer('${escBuyer}')">Eliminar</button></div>
       </div>
       <div class="person-manage-body open">
-        <div class="db-add-form">
-          <input class="code" id="saleNeedCode-${bid}" placeholder="Equipo" />
-          <input class="nums" id="saleNeedNums-${bid}" placeholder="Números: 2,5" />
-          <button onclick="addSaleNeedBulk('${sale.buyer.replace(/'/g, "\\'")}')">+ Agregar a su lista</button>
+        <div class="team-picker">
+          <div class="team-picker-row">
+            <select class="team-select" onchange="pickerSaleNeed['${escBuyer}']=this.value; renderDbVentas();">${teamOptionsHtml(pickerSaleNeed[sale.buyer])}</select>
+          </div>
+          ${numberGridHtml(pickerSaleNeed[sale.buyer], new Set(sale.need[pickerSaleNeed[sale.buyer]] || []), n => `toggleSaleNeedNum('${escBuyer}','${pickerSaleNeed[sale.buyer]}',${n})`)}
         </div>
         <div class="db-list">${needRows.length ? needRows.map(r => {
           const isAlto = (sale.precioAlto || []).some(([c, n]) => c === r.code && n === r.num);
