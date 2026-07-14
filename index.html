@@ -135,6 +135,19 @@
     gap: 10px;
     flex-wrap: wrap;
   }
+  .collapse-toggle {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.25);
+    color: var(--paper);
+    border-radius: 6px;
+    width: 26px;
+    height: 26px;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .collapse-toggle:hover { background: rgba(255,255,255,0.2); }
   .drag-handle {
     cursor: grab;
     touch-action: none;
@@ -614,6 +627,7 @@ var loaded = false;
 var currentTab = 'trades';
 var currentDbSub = 'inventario';
 var openPersonName = null;
+var collapsedPeople = new Set();
 var tengoFilter = '';
 var necesitoFilter = '';
 var pickerTengo = '';
@@ -1068,6 +1082,11 @@ function updateMeet(inputEl, field) {
   saveTrackingState();
 }
 
+function togglePersonCollapse(name) {
+  if (collapsedPeople.has(name)) collapsedPeople.delete(name); else collapsedPeople.add(name);
+  renderTrades();
+}
+
 // ============================================================================
 // RENDER — PÁGINA DE INTERCAMBIOS
 // ============================================================================
@@ -1256,31 +1275,37 @@ function renderTrades() {
     const meetDate = meet.date || '';
     const meetTime = meet.time || '';
 
+    const isCollapsed = collapsedPeople.has(name);
     peopleHtml += `<div class="person-card" data-person-name="${name.replace(/"/g, '&quot;')}">
       <div class="person-head">
         <div class="drag-handle" title="Arrastrar para reordenar">⠿</div>
         <div><div class="person-name">${name}</div><div class="person-meta">${person.location}</div></div>
         <div class="progress-chip">${done}/${total}</div>
+        <button type="button" class="collapse-toggle" title="${isCollapsed ? 'Mostrar intercambios' : 'Ocultar intercambios'}" onclick="togglePersonCollapse(this.closest('.person-card').dataset.personName)">${isCollapsed ? '▸' : '▾'}</button>
         <div class="meet-edit-row">
           <div class="meet-field"><label>Fecha</label><input type="date" data-person="${name}" value="${meetDate}" onchange="updateMeet(this,'date')" /></div>
           <div class="meet-field"><label>Hora</label><input type="time" data-person="${name}" value="${meetTime}" onchange="updateMeet(this,'time')" /></div>
           <div class="meet-field place"><label>Lugar</label><input type="text" placeholder="Lugar de encuentro" data-person="${name}" value="${(meetPlace || '').replace(/"/g, '&quot;')}" onchange="updateMeet(this,'place')" /></div>
         </div>
       </div>`;
-    if (person.conflicto) {
-      peopleHtml += `<div style="padding:10px 16px 0"><div style="font-weight:700;font-size:11px;color:#C00000;font-family:'Barlow Condensed',sans-serif">⏸️ AVISO</div>
-        <div style="font-size:12.5px;padding:4px 0 10px">${person.conflicto}</div></div>`;
+    if (!isCollapsed) {
+      peopleHtml += `<div class="person-body">`;
+      if (person.conflicto) {
+        peopleHtml += `<div style="padding:10px 16px 0"><div style="font-weight:700;font-size:11px;color:#C00000;font-family:'Barlow Condensed',sans-serif">⏸️ AVISO</div>
+          <div style="font-size:12.5px;padding:4px 0 10px">${person.conflicto}</div></div>`;
+      }
+      if (total > 0) {
+        peopleHtml += `<div class="trade-row trade-row-header">
+          <div></div>
+          <div class="col-label">📥 Recibís (te da ${name.split(' ')[0]})</div>
+          <div></div>
+          <div class="col-label">📤 Das (le das vos)</div>
+        </div>`;
+      }
+      for (const s of special) peopleHtml += renderTradeRow(s, true);
+      for (const pr of pairs) peopleHtml += renderTradeRow(pr, false);
+      peopleHtml += `</div>`;
     }
-    if (total > 0) {
-      peopleHtml += `<div class="trade-row trade-row-header">
-        <div></div>
-        <div class="col-label">📥 Recibís (te da ${name.split(' ')[0]})</div>
-        <div></div>
-        <div class="col-label">📤 Das (le das vos)</div>
-      </div>`;
-    }
-    for (const s of special) peopleHtml += renderTradeRow(s, true);
-    for (const pr of pairs) peopleHtml += renderTradeRow(pr, false);
     peopleHtml += `</div>`;
   }
 
