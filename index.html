@@ -233,6 +233,32 @@
     font-family: 'Barlow Condensed', sans-serif; font-size: 12.5px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.03em; color: var(--pitch-dark); background: var(--paper);
   }
+  .people-group { margin-bottom: 8px; }
+  .group-header {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.03em; color: var(--pitch-dark);
+    padding: 4px 2px 10px; margin-top: 6px;
+    display: flex; align-items: baseline; gap: 6px;
+  }
+  .group-header span { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: none; letter-spacing: normal; }
+  .group-header.completed { color: var(--green-check); }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,42,32,0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px;
+  }
+  .modal-box {
+    background: #fffdf7; border-radius: 14px; padding: 28px 24px; max-width: 360px; width: 100%;
+    text-align: center; box-shadow: 0 12px 32px rgba(0,0,0,0.3);
+  }
+  .modal-icon { font-size: 40px; margin-bottom: 8px; }
+  .modal-title { font-family: 'Archivo Black', sans-serif; font-size: 18px; color: var(--pitch-dark); margin-bottom: 8px; }
+  .modal-text { font-size: 13.5px; color: var(--muted); margin-bottom: 20px; line-height: 1.4; }
+  .modal-btn {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px; text-transform: uppercase;
+    background: var(--green-check); color: #fff; border: none; border-radius: 8px; padding: 10px 28px; cursor: pointer;
+  }
+  .modal-btn:hover { background: #256b41; }
   .trade-row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--green-check); cursor: pointer; margin-top: 2px; }
   .trade-row input[type=checkbox]:disabled { cursor: not-allowed; }
   .sticker-block { min-width: 0; }
@@ -426,6 +452,15 @@
 </main>
 
 <footer id="footerText"></footer>
+
+<div class="modal-overlay" id="completeModalOverlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-icon">🎉</div>
+    <div class="modal-title">¡Intercambio completado!</div>
+    <div class="modal-text" id="completeModalText"></div>
+    <button class="modal-btn" onclick="acceptCompleteModal()">Aceptar</button>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
@@ -713,8 +748,9 @@ var pickerPersonHave = {};
 var pickerPersonNeed = {};
 var pickerSaleNeed = {};
 let _matchCache = {};
-let sortableInstance = null;
+let personSortableInstances = [];
 let rowSortableInstances = [];
+var pendingCompletePerson = null;
 
 function getMatches(personName) {
   if (!_matchCache[personName]) _matchCache[personName] = computePersonMatches(personName);
@@ -856,6 +892,19 @@ function eligiblePeopleNames() {
   });
 }
 
+// Un intercambio está "Completado" cuando todos sus ítems (especiales +
+// pares) ya están marcados. Alguien sin ítems (sólo un aviso/conflicto)
+// nunca cuenta como completado.
+function isPersonComplete(name) {
+  const { special, pairs } = getMatches(name);
+  const total = special.length + pairs.length;
+  if (total === 0) return false;
+  let done = 0;
+  for (const s of special) if (checked.has(s.id)) done++;
+  for (const pr of pairs) if (checked.has(pr.id)) done++;
+  return done === total;
+}
+
 function meetTimestamp(name) {
   const m = meetInfo[name] || {};
   if (!m.date) return null;
@@ -942,21 +991,31 @@ function sortByTradeCount() {
 }
 
 function initPeopleSortable() {
-  const el = document.getElementById('peopleList');
-  if (!el || typeof Sortable === 'undefined') return;
-  if (sortableInstance) { sortableInstance.destroy(); sortableInstance = null; }
-  sortableInstance = new Sortable(el, {
-    handle: '.drag-handle',
-    animation: 150,
-    draggable: '.person-card',
-    forceFallback: true,
-    fallbackTolerance: 3,
-    onEnd: function () {
-      personOrder = Array.from(el.children).map(child => child.dataset.personName);
-      sortMode = 'manual';
-      saveTrackingState();
-      document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
-    },
+  personSortableInstances.forEach(inst => inst.destroy());
+  personSortableInstances = [];
+  if (typeof Sortable === 'undefined') return;
+  ['peopleList-encurso', 'peopleList-completados'].forEach(containerId => {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const inst = new Sortable(el, {
+      handle: '.drag-handle',
+      animation: 150,
+      draggable: '.person-card',
+      forceFallback: true,
+      fallbackTolerance: 3,
+      onEnd: function () {
+        // Reordena sólo dentro de este grupo (En Curso / Completados),
+        // conservando las posiciones relativas del otro grupo intactas.
+        const names = Array.from(el.children).map(child => child.dataset.personName);
+        const nameSet = new Set(names);
+        let idx = 0;
+        personOrder = personOrder.map(n => nameSet.has(n) ? names[idx++] : n);
+        sortMode = 'manual';
+        saveTrackingState();
+        document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+      },
+    });
+    personSortableInstances.push(inst);
   });
 }
 
@@ -967,7 +1026,7 @@ function initRowSortables() {
   rowSortableInstances.forEach(inst => inst.destroy());
   rowSortableInstances = [];
   if (typeof Sortable === 'undefined') return;
-  document.querySelectorAll('#peopleList .rows-list').forEach(el => {
+  document.querySelectorAll('.people-group .rows-list').forEach(el => {
     const inst = new Sortable(el, {
       handle: '.row-drag-handle',
       animation: 150,
@@ -1021,10 +1080,29 @@ function switchDbSub(sub) {
 // TOGGLE / CHECK
 // ============================================================================
 function toggle(id) {
-  if (checked.has(id)) checked.delete(id);
-  else checked.add(id);
+  const turningOn = !checked.has(id);
+  if (turningOn) checked.add(id); else checked.delete(id);
   saveTrackingState();
   renderAll();
+  if (turningOn) {
+    const personName = pairPersonName(id);
+    if (state.people[personName] && isPersonComplete(personName)) {
+      showTradeCompleteModal(personName);
+    }
+  }
+}
+
+function showTradeCompleteModal(personName) {
+  pendingCompletePerson = personName;
+  document.getElementById('completeModalText').textContent =
+    `Ya marcaste todos los intercambios con ${personName}. Se va a mover a "Completados".`;
+  document.getElementById('completeModalOverlay').style.display = 'flex';
+}
+function acceptCompleteModal() {
+  if (pendingCompletePerson) collapsedPeople.add(pendingCompletePerson);
+  pendingCompletePerson = null;
+  document.getElementById('completeModalOverlay').style.display = 'none';
+  renderTrades();
 }
 
 function pairPersonName(pairId) {
@@ -1445,8 +1523,7 @@ function renderTrades() {
     <span class="drag-hint">↕ Arrastrá el encabezado de una tarjeta para reordenar a mano</span>
   </div>`;
 
-  let peopleHtml = '';
-  for (const name of syncPersonOrder()) {
+  function renderPersonCard(name) {
     const person = state.people[name];
     const { special, pairs } = getMatches(name);
     const total = special.length + pairs.length;
@@ -1460,7 +1537,7 @@ function renderTrades() {
     const meetTime = meet.time || '';
 
     const isCollapsed = collapsedPeople.has(name);
-    peopleHtml += `<div class="person-card" data-person-name="${name.replace(/"/g, '&quot;')}">
+    let html = `<div class="person-card" data-person-name="${name.replace(/"/g, '&quot;')}">
       <div class="person-head">
         <div class="drag-handle" title="Arrastrar para reordenar">⠿</div>
         <div><div class="person-name">${name}</div><div class="person-meta">${person.location}</div></div>
@@ -1473,13 +1550,13 @@ function renderTrades() {
         </div>
       </div>`;
     if (!isCollapsed) {
-      peopleHtml += `<div class="person-body">`;
+      html += `<div class="person-body">`;
       if (person.conflicto) {
-        peopleHtml += `<div style="padding:10px 16px 0"><div style="font-weight:700;font-size:11px;color:#C00000;font-family:'Barlow Condensed',sans-serif">⏸️ AVISO</div>
+        html += `<div style="padding:10px 16px 0"><div style="font-weight:700;font-size:11px;color:#C00000;font-family:'Barlow Condensed',sans-serif">⏸️ AVISO</div>
           <div style="font-size:12.5px;padding:4px 0 10px">${person.conflicto}</div></div>`;
       }
       if (total > 0) {
-        peopleHtml += `<div class="trade-row trade-row-header">
+        html += `<div class="trade-row trade-row-header">
           <div></div><div></div>
           <div class="col-label">📥 Recibís (te da ${name.split(' ')[0]})</div>
           <div></div>
@@ -1487,8 +1564,8 @@ function renderTrades() {
         </div>`;
       }
       if (special.length) {
-        peopleHtml += `<div class="section-header">🤝 Trato Especial (${special.length})</div>`;
-        for (const s of special) peopleHtml += renderTradeRow(s, true);
+        html += `<div class="section-header">🤝 Trato Especial (${special.length})</div>`;
+        for (const s of special) html += renderTradeRow(s, true);
       }
       const bySection = {};
       for (const pr of pairs) {
@@ -1501,17 +1578,29 @@ function renderTrades() {
         const byId = {};
         for (const pr of items) byId[pr.id] = pr;
         const orderedIds = syncSectionOrder(name, sec.key, items.map(pr => pr.id));
-        peopleHtml += `<div class="section-header">${sec.label} (${items.length})</div>`;
-        peopleHtml += `<div class="rows-list" data-person-name="${name.replace(/"/g, '&quot;')}" data-section="${sec.key}">`;
-        for (const id of orderedIds) peopleHtml += renderTradeRow(byId[id], false);
-        peopleHtml += `</div>`;
+        html += `<div class="section-header">${sec.label} (${items.length})</div>`;
+        html += `<div class="rows-list" data-person-name="${name.replace(/"/g, '&quot;')}" data-section="${sec.key}">`;
+        for (const id of orderedIds) html += renderTradeRow(byId[id], false);
+        html += `</div>`;
       }
-      peopleHtml += `</div>`;
+      html += `</div>`;
     }
-    peopleHtml += `</div>`;
+    html += `</div>`;
+    return html;
   }
 
-  document.getElementById('page-trades').innerHTML = sortBarHtml + `<div id="peopleList">${peopleHtml}</div>`;
+  const orderedNames = syncPersonOrder();
+  const enCursoNames = orderedNames.filter(n => !isPersonComplete(n));
+  const completadosNames = orderedNames.filter(n => isPersonComplete(n));
+
+  let groupsHtml = `<div class="group-header">🔄 En Curso <span>(${enCursoNames.length})</span></div>
+    <div id="peopleList-encurso" class="people-group">${enCursoNames.map(renderPersonCard).join('')}</div>`;
+  if (completadosNames.length) {
+    groupsHtml += `<div class="group-header completed">✅ Completados <span>(${completadosNames.length})</span></div>
+    <div id="peopleList-completados" class="people-group">${completadosNames.map(renderPersonCard).join('')}</div>`;
+  }
+
+  document.getElementById('page-trades').innerHTML = sortBarHtml + groupsHtml;
   document.getElementById('footerText').innerHTML = 'Marca un intercambio como hecho apenas lo confirmes en persona. Si el mismo sticker tuyo está comprometido en otro trato, ese trato se bloquea automáticamente. Cada lado tiene su propio menú para cambiar de sticker, y un cuadro para sumar stickers extra cuando uno vale más que el otro. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
   initPeopleSortable();
   initRowSortables();
