@@ -1326,6 +1326,22 @@ function manualPairDoyCandidates(personName) {
     .filter(c => (c.qty - usedCountFor(c.key, '')) > 0)
     .sort((a, b) => a.key.localeCompare(b.key));
 }
+// Para las listas del "+ Agregar otro intercambio": marca en rojo (vía CSS
+// inline en el <option>) lo que no sirve (no está en necesito/need) o lo que
+// ya figura en el trato de esa persona — para verlo de un vistazo antes de
+// elegir.
+function manualReciboOptFlag(personName, key) {
+  const { code, num } = codeNumFromKey(key);
+  const notUseful = !necesitoHas(code, num);
+  const alreadyInList = usedReciboCountForPerson(personName, key, '') > 0;
+  return notUseful || alreadyInList;
+}
+function manualDoyOptFlag(personName, key) {
+  const { code, num } = codeNumFromKey(key);
+  const notUseful = !personNeedsThis(personName, code, num);
+  const alreadyInList = (personDoyKeyCounts(personName)[key] || 0) > 0;
+  return notUseful || alreadyInList;
+}
 function buildManualPairs(personName) {
   const list = manualPairs[personName] || [];
   return list.map(m => ({
@@ -2245,12 +2261,12 @@ function renderTrades() {
         <div class="manual-add-row">
           <select id="manualRecibo-${cid}">
             <option value="">Elegí lo que te da${manualReciboOpts.length ? ` (${manualReciboOpts.length})` : ''}...</option>
-            ${manualReciboOpts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}">${c.key} — ${shortLabel(c.label)}</option>`).join('')}
+            ${manualReciboOpts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}" ${manualReciboOptFlag(name, c.key) ? 'style="color:var(--red)"' : ''}>${c.key} — ${shortLabel(c.label)}</option>`).join('')}
           </select>
           <span class="manual-arrow">⇄</span>
           <select id="manualDoy-${cid}">
             <option value="">Elegí lo que le das${manualDoyOpts.length ? ` (${manualDoyOpts.length})` : ''}...</option>
-            ${manualDoyOpts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}">${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`).join('')}
+            ${manualDoyOpts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}" ${manualDoyOptFlag(name, c.key) ? 'style="color:var(--red)"' : ''}>${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`).join('')}
           </select>
           <button type="button" onclick="confirmAddManualPair('${escName}')">+ Agregar</button>
         </div>`;
