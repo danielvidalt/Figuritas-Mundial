@@ -851,6 +851,11 @@ var meetInfo = {};
 var valueOverrides = {};
 var rowOrder = {};
 var manualPairs = {};
+// Pares AUTOMÁTICOS (no manuales) que el usuario borró de la lista de un
+// intercambio — guarda la "firma" recibo+doy para excluirlos de
+// computePersonMatches en cada render (el emparejamiento en sí no se toca,
+// sólo se saca ese par puntual de la lista visible).
+var removedAutoPairs = {};
 var personOrder = [];
 var sortMode = 'chrono';
 var loaded = false;
@@ -877,12 +882,40 @@ let explodeSortableInstances = [];
 var explodedPeople = new Set();
 var pendingCompletePerson = null;
 
+function pairSignature(p) {
+  return `${p.recibo_code}|${p.recibo_num}|${p.doy_code}|${p.doy_num}`;
+}
 function getMatches(personName) {
   if (!_matchCache[personName]) {
     const base = computePersonMatches(personName);
-    _matchCache[personName] = { special: base.special, pairs: [...base.pairs, ...buildManualPairs(personName)] };
+    const excluded = new Set(removedAutoPairs[personName] || []);
+    const autoPairs = base.pairs.filter(p => !excluded.has(pairSignature(p)));
+    _matchCache[personName] = { special: base.special, pairs: [...autoPairs, ...buildManualPairs(personName)] };
   }
   return _matchCache[personName];
+}
+// Quita una fila de la lista de intercambio: si es un par automático, lo
+// marca como excluido (sin tocar tengo/necesito/have/need, así que su
+// stock queda libre para otro cruce vía "Match" o a mano); si es manual,
+// simplemente se saca de manualPairs.
+function removeTradeRow(pairId) {
+  const personName = pairPersonName(pairId);
+  const pair = findPairById(pairId);
+  if (pair && pair.isManual) {
+    removeManualPair(personName, pair.uid);
+    return;
+  }
+  if (!pair) return;
+  if (!removedAutoPairs[personName]) removedAutoPairs[personName] = [];
+  const sig = pairSignature(pair);
+  if (!removedAutoPairs[personName].includes(sig)) removedAutoPairs[personName].push(sig);
+  delete swaps[pairId];
+  delete doySwaps[pairId];
+  delete extras[pairId];
+  delete valueOverrides[pairId];
+  checked.delete(pairId);
+  saveTrackingState();
+  renderAll();
 }
 
 // FWC_trofeo y FWC_mundo no existen como secciones separadas en el álbum real
@@ -987,6 +1020,10 @@ async function loadAll() {
     const r = await window.storage.get('panini-tracker-manualpairs', false);
     if (r && r.value) manualPairs = JSON.parse(r.value);
   } catch (e) {}
+  try {
+    const r = await window.storage.get('panini-tracker-removedpairs', false);
+    if (r && r.value) removedAutoPairs = JSON.parse(r.value);
+  } catch (e) {}
 
   loaded = true;
   renderAll();
@@ -1011,6 +1048,7 @@ async function saveTrackingState() {
     await window.storage.set('panini-tracker-order', JSON.stringify(personOrder), false);
     await window.storage.set('panini-tracker-roworder', JSON.stringify(rowOrder), false);
     await window.storage.set('panini-tracker-manualpairs', JSON.stringify(manualPairs), false);
+    await window.storage.set('panini-tracker-removedpairs', JSON.stringify(removedAutoPairs), false);
   } catch (e) { console.error('No se pudo guardar el progreso', e); }
 }
 
@@ -1862,6 +1900,7 @@ function runMatchReset(personName) {
   if (!confirm(`¿Reiniciar el intercambio con ${personName}?\n\nEsto quita los stickers cambiados, los extras y los intercambios agregados a mano para esa persona, y arma de nuevo la lista base con todo lo que le sirve a ambas partes.`)) return;
   delete manualPairs[personName];
   delete rowOrder[personName];
+  delete removedAutoPairs[personName];
   for (const id of Object.keys(swaps)) if (pairPersonName(id) === personName) delete swaps[id];
   for (const id of Object.keys(doySwaps)) if (pairPersonName(id) === personName) delete doySwaps[id];
   for (const id of Object.keys(extras)) if (pairPersonName(id) === personName) delete extras[id];
@@ -2117,7 +2156,7 @@ function renderTradeRow(item, isSpecial) {
         <div class="sticker-label">${reciboLabel} ${reciboValueToggle}${reciboNotNeededNote}</div>
         ${reciboSwapHtml}
       </div>
-      <div class="arrow">⇄${item.isManual && !isChecked ? `<button type="button" class="remove-manual-btn" title="Quitar este intercambio agregado a mano" onclick="removeManualPair('${pairPersonName(item.id).replace(/'/g, "\\'")}','${item.uid}')">✕</button>` : ''}</div>
+      <div class="arrow">⇄${!isSpecial && !isChecked ? `<button type="button" class="remove-manual-btn" title="Quitar esta fila del intercambio" onclick="removeTradeRow('${escId}')">✕</button>` : ''}</div>
       <div class="sticker-block">
         <div class="sticker-code ${doyNotNeeded ? 'not-needed' : ''}">${doy}${!isChecked ? doyLiveStockNoteHtml(doy) : ''}</div>
         <div class="sticker-label">${doyLabel} ${doyValueToggle}${doyNotNeededNote}</div>
@@ -3075,6 +3114,7 @@ document.getElementById('resetBtn').addEventListener('click', async () => {
     doySwaps = {};
     extras = {};
     meetInfo = {};
+    removedAutoPairs = {};
     await saveTrackingState();
     renderAll();
   }
