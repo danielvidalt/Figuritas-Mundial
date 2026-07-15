@@ -207,6 +207,8 @@
   .meet-edit-row { flex-basis: 100%; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   .meet-field { display: flex; flex-direction: column; gap: 2px; }
   .meet-field label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gold-soft); }
+  .meet-undefined { font-size: 10px; font-style: italic; color: var(--gold-soft); opacity: 0.85; margin-top: 2px; display: block; }
+  .person-manage-body .meet-undefined { color: var(--muted); }
   .meet-field input {
     font-family: 'Inter', sans-serif; font-size: 12.5px;
     background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25);
@@ -1544,7 +1546,7 @@ function renderTrades() {
         <div class="progress-chip">${done}/${total}</div>
         <button type="button" class="collapse-toggle" title="${isCollapsed ? 'Mostrar intercambios' : 'Ocultar intercambios'}" onclick="togglePersonCollapse(this.closest('.person-card').dataset.personName)">${isCollapsed ? '▸' : '▾'}</button>
         <div class="meet-edit-row">
-          <div class="meet-field"><label>Fecha</label><input type="date" data-person="${name}" value="${meetDate}" onchange="updateMeet(this,'date')" /></div>
+          <div class="meet-field"><label>Fecha</label><input type="date" data-person="${name}" value="${meetDate}" onchange="updateMeet(this,'date')" />${!meetDate ? '<span class="meet-undefined">Sin definir</span>' : ''}</div>
           <div class="meet-field"><label>Hora</label><input type="time" data-person="${name}" value="${meetTime}" onchange="updateMeet(this,'time')" /></div>
           <div class="meet-field place"><label>Lugar</label><input type="text" placeholder="Lugar de encuentro" data-person="${name}" value="${(meetPlace || '').replace(/"/g, '&quot;')}" onchange="updateMeet(this,'place')" /></div>
         </div>
@@ -2122,7 +2124,7 @@ function renderDbVentas() {
       </div>
       <div class="person-manage-body open">
         <div class="meet-edit-row" style="margin-bottom:14px">
-          <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Fecha</label><input type="date" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetDate}" onchange="updateMeet(this,'date')" /></div>
+          <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Fecha</label><input type="date" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetDate}" onchange="updateMeet(this,'date')" />${!meetDate ? '<span class="meet-undefined">Sin definir</span>' : ''}</div>
           <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Hora</label><input type="time" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetTime}" onchange="updateMeet(this,'time')" /></div>
           <div class="meet-field place" style="color:var(--ink)"><label style="color:var(--muted)">Lugar</label><input type="text" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" placeholder="Lugar de encuentro" data-person="${buyerKey}" value="${(meetPlace || '').replace(/"/g, '&quot;')}" onchange="updateMeet(this,'place')" /></div>
         </div>
