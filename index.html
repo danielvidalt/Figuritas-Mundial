@@ -244,7 +244,6 @@
   .rows-list .trade-item.sortable-ghost { opacity: 0.35; }
   .rows-list .trade-item.sortable-drag, .rows-list .trade-item.sortable-fallback { box-shadow: 0 6px 18px rgba(0,0,0,0.2); background: #fffdf7; }
   .trade-row.extra-row { border-top: none; padding-top: 4px; padding-bottom: 4px; }
-  .sticker-block.extra-block .sticker-code { font-size: 13px; }
   .remove-extra-btn { font-size: 10px; color: var(--red); background: none; border: none; cursor: pointer; padding: 0; margin-top: 2px; }
   .remove-extra-btn:hover { text-decoration: underline; }
   .add-row { padding-top: 2px; }
@@ -348,6 +347,16 @@
   .db-subtotal { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
   .db-subtotal b { color: var(--pitch-dark); }
   .db-live-note { display: block; font-size: 11px; color: var(--green-check); font-weight: 600; margin-top: 1px; }
+  .db-outofstock-note { display: block; font-size: 11px; color: var(--red); font-weight: 600; margin-top: 1px; }
+  .db-group-header {
+    padding: 8px 10px 5px; margin-top: 6px;
+    font-family: 'Barlow Condensed', sans-serif; font-size: 12.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted);
+    border-top: 1px dashed var(--paper-line);
+  }
+  .db-group-header.out { color: var(--red); }
+  .db-group-header.got { color: var(--green-check); }
+  .db-row.out-of-stock { opacity: 0.7; }
 
   .db-add-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 8px; padding: 10px; margin-bottom: 12px; }
   .db-add-form input, .db-add-form select {
@@ -1836,30 +1845,43 @@ function tengoFilteredRows() {
   });
   return { all, filtered };
 }
-function buildTengoListHtml() {
-  const { filtered } = tengoFilteredRows();
-  if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
-  return filtered.map(r => {
-    const givenNote = r.given > 0
-      ? `<span class="db-live-note">✅ ${r.given} ya entregado${r.given > 1 ? 's' : ''} (de ${r.rawQty} originales)</span>`
-      : '';
-    return `<div class="db-row">
+function buildTengoRowHtml(r) {
+  const givenNote = r.given > 0
+    ? `<span class="db-live-note">✅ ${r.given} ya entregado${r.given > 1 ? 's' : ''} (de ${r.rawQty} originales)</span>`
+    : '';
+  const outNote = r.qty === 0
+    ? `<span class="db-outofstock-note">⚠ Sin stock disponible — no se ofrece más en Intercambios</span>`
+    : '';
+  return `<div class="db-row ${r.qty === 0 ? 'out-of-stock' : ''}">
       <span class="code">${stickerDisplay(r.code, r.num)}</span>
-      <span class="label">${categoryLabelOf(r.code, r.num)}${givenNote}</span>
+      <span class="label">${categoryLabelOf(r.code, r.num)}${givenNote}${outNote}</span>
       <input type="number" class="qty-input" min="0" value="${r.qty}" title="Cantidad disponible ahora mismo (ya descontando lo entregado)" onchange="updateTengoQty('${r.code}',${r.num},this.value)" />
       <button class="edit-value" title="Editar si es un sticker de valor especial" onclick="editPremium('${r.code}',${r.num})">✎</button>
       <button class="del" onclick="removeTengo('${r.code}',${r.num})">✕</button>
     </div>`;
-  }).join('');
+}
+function buildTengoListHtml() {
+  const { filtered } = tengoFilteredRows();
+  if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
+  const inStock = filtered.filter(r => r.qty > 0);
+  const outOfStock = filtered.filter(r => r.qty === 0);
+  let html = inStock.map(buildTengoRowHtml).join('');
+  if (outOfStock.length) {
+    html += `<div class="db-group-header out">⚠ Sin stock (${outOfStock.length})</div>`;
+    html += outOfStock.map(buildTengoRowHtml).join('');
+  }
+  return html;
 }
 function buildTengoSubtotalHtml() {
   const { all, filtered } = tengoFilteredRows();
   const totalCopies = all.reduce((a, r) => a + r.qty, 0);
-  const filteredCopies = filtered.reduce((a, r) => a + r.qty, 0);
+  const outOfStockCount = all.filter(r => r.qty === 0).length;
+  const outPart = outOfStockCount > 0 ? ` · <b>${outOfStockCount}</b> sin stock` : '';
   if (filtered.length === all.length) {
-    return `<div class="db-subtotal"><b>${all.length}</b> stickers únicos · <b>${totalCopies}</b> copias disponibles ahora</div>`;
+    return `<div class="db-subtotal"><b>${all.length}</b> stickers únicos · <b>${totalCopies}</b> copias disponibles ahora${outPart}</div>`;
   }
-  return `<div class="db-subtotal">Mostrando <b>${filtered.length}</b> de <b>${all.length}</b> stickers únicos (<b>${filteredCopies}</b> copias) — de un total de <b>${totalCopies}</b> copias disponibles</div>`;
+  const filteredCopies = filtered.reduce((a, r) => a + r.qty, 0);
+  return `<div class="db-subtotal">Mostrando <b>${filtered.length}</b> de <b>${all.length}</b> stickers únicos (<b>${filteredCopies}</b> copias) — de un total de <b>${totalCopies}</b> copias disponibles${outPart}</div>`;
 }
 function necesitoFilteredRows() {
   const all = [];
@@ -1875,24 +1897,34 @@ function necesitoFilteredRows() {
   });
   return { all, filtered };
 }
-function buildNecesitoListHtml() {
-  const { filtered } = necesitoFilteredRows();
-  if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
-  return filtered.map(r => {
-    const received = receivedCountFor(stickerDisplay(r.code, r.num));
-    const receivedNote = received > 0 ? `<span class="db-live-note">✅ Ya lo recibiste (trato completado)</span>` : '';
-    return `<div class="db-row">
+function buildNecesitoRowHtml(r) {
+  const receivedNote = r.received > 0 ? `<span class="db-live-note">✅ Ya lo recibiste (trato completado)</span>` : '';
+  return `<div class="db-row ${r.received > 0 ? 'out-of-stock' : ''}">
       <span class="code">${stickerDisplay(r.code, r.num)}</span>
       <span class="label">${categoryLabelOf(r.code, r.num)}${receivedNote}</span>
       <button class="edit-value" title="Editar si es un sticker de valor especial" onclick="editPremium('${r.code}',${r.num})">✎</button>
       <button class="del" onclick="removeNecesito('${r.code}',${r.num})">✕</button>
     </div>`;
-  }).join('');
+}
+function buildNecesitoListHtml() {
+  const { filtered } = necesitoFilteredRows();
+  if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
+  const rows = filtered.map(r => ({ ...r, received: receivedCountFor(stickerDisplay(r.code, r.num)) }));
+  const pending = rows.filter(r => r.received === 0);
+  const already = rows.filter(r => r.received > 0);
+  let html = pending.map(buildNecesitoRowHtml).join('');
+  if (already.length) {
+    html += `<div class="db-group-header got">✅ Ya conseguidos (${already.length})</div>`;
+    html += already.map(buildNecesitoRowHtml).join('');
+  }
+  return html;
 }
 function buildNecesitoSubtotalHtml() {
   const { all, filtered } = necesitoFilteredRows();
-  if (filtered.length === all.length) return `<div class="db-subtotal"><b>${all.length}</b> stickers en total</div>`;
-  return `<div class="db-subtotal">Mostrando <b>${filtered.length}</b> de <b>${all.length}</b> stickers</div>`;
+  const gotCount = all.filter(r => receivedCountFor(stickerDisplay(r.code, r.num)) > 0).length;
+  const gotPart = gotCount > 0 ? ` · <b>${gotCount}</b> ya conseguidos` : '';
+  if (filtered.length === all.length) return `<div class="db-subtotal"><b>${all.length}</b> stickers en total${gotPart}</div>`;
+  return `<div class="db-subtotal">Mostrando <b>${filtered.length}</b> de <b>${all.length}</b> stickers${gotPart}</div>`;
 }
 function refreshTengoList() {
   document.getElementById('tengoSubtotal').innerHTML = buildTengoSubtotalHtml();
@@ -1994,13 +2026,13 @@ function removeTengo(code, num) {
 // histórico. Se traduce de vuelta sumando lo ya entregado, para no perder
 // esos tratos completados (el motor de emparejamiento necesita que el
 // crudo siga siendo > 0 mientras haya un trato hecho con ese sticker).
+// Llegar a 0 disponibles NO borra el sticker — se guarda en 0 y queda
+// agrupado en "Sin stock", visible pero fuera de nuevos intercambios.
 function updateTengoQty(code, num, availableQty) {
   availableQty = parseInt(availableQty, 10);
   if (isNaN(availableQty) || availableQty < 0) availableQty = 0;
   const given = usedCountFor(stickerDisplay(code, num), '');
-  const newRaw = availableQty + given;
-  if (newRaw <= 0) { removeTengo(code, num); return; }
-  state.tengo[code][String(num)] = newRaw;
+  state.tengo[code][String(num)] = availableQty + given;
   saveDbState();
   renderAll();
 }
