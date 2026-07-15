@@ -326,6 +326,7 @@
   .sticker-code.conflict { color: var(--orange); }
   .sticker-code.filler { color: var(--violet); }
   .filler-note { display: block; color: var(--violet); font-weight: 600; }
+  .dup-note { display: block; color: var(--red); font-weight: 600; }
   .value-toggle {
     border: none; background: transparent; cursor: pointer; font-size: 12px;
     padding: 0 2px; opacity: 0.55; vertical-align: middle;
@@ -2116,6 +2117,15 @@ function renderTradeRow(item, isSpecial) {
   const reciboNotNeededNote = reciboNotNeeded ? `<span class="filler-note">🟣 Extra de relleno — vos no lo necesitás</span>` : '';
   const doyNotNeededNote = doyNotNeeded ? `<span class="filler-note">🟣 Extra de relleno — no lo necesita</span>` : '';
 
+  // Avisa cuando el mismo sticker aparece repetido en el trato de esta
+  // persona — ya se marcó en rojo al elegirlo en la lista de abajo (y, para
+  // el lado doy, hubo que confirmar el diálogo de duplicado) pero conviene
+  // que quede visible en la fila también, no sólo en el momento de agregarlo.
+  const reciboDupCount = recibo ? usedReciboCountForPerson(personNameForRow, recibo, '') : 0;
+  const doyDupCount = doy ? (personDoyKeyCounts(personNameForRow)[doy] || 0) : 0;
+  const reciboDupNote = reciboDupCount > 1 ? `<span class="dup-note">🔴 Está ${reciboDupCount} veces en este intercambio</span>` : '';
+  const doyDupNote = doyDupCount > 1 ? `<span class="dup-note">🔴 Está ${doyDupCount} veces en este intercambio</span>` : '';
+
   const escId = item.id.replace(/'/g, "\\'");
   const ov = valueOverrides[item.id] || {};
   const reciboIsPremium = !!recibo && isPremiumLabel(realReciboLabel);
@@ -2182,14 +2192,14 @@ function renderTradeRow(item, isSpecial) {
   const reciboBlockHtml = recibo
     ? `<div class="sticker-block">
         <div class="sticker-code ${reciboNotNeeded ? 'filler' : ''}">${recibo}</div>
-        <div class="sticker-label">${reciboLabel} ${reciboValueToggle}${reciboNotNeededNote}</div>
+        <div class="sticker-label">${reciboLabel} ${reciboValueToggle}${reciboNotNeededNote}${reciboDupNote}</div>
         ${reciboSwapHtml}
       </div>`
     : '<div class="sticker-block empty-block"></div>';
   const doyBlockHtml = doy
     ? `<div class="sticker-block">
         <div class="sticker-code ${doyNotNeeded ? 'filler' : ''} ${!isChecked && doyConflictInfo(doy) ? 'conflict' : ''}">${doy}${!isChecked ? doyLiveStockNoteHtml(doy, personNameForRow) : ''}</div>
-        <div class="sticker-label">${doyLabel} ${doyValueToggle}${doyNotNeededNote}</div>
+        <div class="sticker-label">${doyLabel} ${doyValueToggle}${doyNotNeededNote}${doyDupNote}</div>
         ${doySwapHtml}
       </div>`
     : '<div class="sticker-block empty-block"></div>';
