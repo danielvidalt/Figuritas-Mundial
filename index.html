@@ -312,6 +312,8 @@
   .value-note { color: var(--gold); font-style: italic; }
   .sticker-code.not-needed { color: var(--red); }
   .not-needed-note { display: block; color: var(--red); font-weight: 600; }
+  .live-stock-note { font-size: 10.5px; font-weight: 600; color: var(--muted); }
+  .live-stock-note.danger { color: var(--red); }
   .value-toggle {
     border: none; background: transparent; cursor: pointer; font-size: 12px;
     padding: 0 2px; opacity: 0.55; vertical-align: middle;
@@ -1479,6 +1481,36 @@ function stockRemainingText(stickerKey, usedExcl) {
   return { total, remaining };
 }
 
+// Cuántas veces se usa "key" como lado DOY (lo que yo entrego) en TODOS los
+// intercambios de TODAS las personas, estén confirmados (✓) o no — a
+// diferencia de usedCountFor (que sólo cuenta lo ya confirmado), esto
+// refleja en tiempo real cuánto de mi stock ya está comprometido apenas lo
+// elijo en algún trato.
+function doyLiveUsageCount(key) {
+  let count = 0;
+  for (const name of Object.keys(state.people)) {
+    const { special, pairs } = getMatches(name);
+    for (const s of special) {
+      if (stickerDisplay(s.doy_code, s.doy_num) === key) count++;
+    }
+    for (const pr of pairs) {
+      if (effectiveDoy(pr) === key) count++;
+      count += getExtras(pr.id, 'doy').filter(k => k === key).length;
+    }
+  }
+  return count;
+}
+// Texto chico al lado del código, con cuánto queda disponible de ese
+// sticker una vez descontado TODO lo que ya está comprometido (aunque no
+// esté confirmado todavía) en cualquier intercambio.
+function doyLiveStockNoteHtml(key) {
+  const { code, num } = codeNumFromKey(key);
+  const total = tengoQty(code, num);
+  if (total <= 1) return '';
+  const remaining = total - doyLiveUsageCount(key);
+  return ` <span class="live-stock-note${remaining < 0 ? ' danger' : ''}">(quedan ${remaining})</span>`;
+}
+
 // ============================================================================
 // EXTRAS (sumar stickers para compensar valor)
 // ============================================================================
@@ -1982,7 +2014,7 @@ function renderTradeRow(item, isSpecial) {
       </div>
       <div class="arrow">⇄${item.isManual && !isChecked ? `<button type="button" class="remove-manual-btn" title="Quitar este intercambio agregado a mano" onclick="removeManualPair('${pairPersonName(item.id).replace(/'/g, "\\'")}','${item.uid}')">✕</button>` : ''}</div>
       <div class="sticker-block">
-        <div class="sticker-code ${doyNotNeeded ? 'not-needed' : ''}">${doy}</div>
+        <div class="sticker-code ${doyNotNeeded ? 'not-needed' : ''}">${doy}${!isChecked ? doyLiveStockNoteHtml(doy) : ''}</div>
         <div class="sticker-label">${doyLabel} ${doyValueToggle}${doyNotNeededNote}</div>
         ${doySwapHtml}
       </div>
@@ -2013,7 +2045,7 @@ function renderTradeRow(item, isSpecial) {
       const kNotNeeded = side === 'recibo' ? !necesitoHas(kCN.code, kCN.num) : !personNeedsThis(personNameForRow, kCN.code, kCN.num);
       const kNotNeededNote = kNotNeeded ? `<span class="not-needed-note">🔴 ${side === 'recibo' ? 'Vos no lo necesitás' : 'No lo necesita'}</span>` : '';
       return `<div class="sticker-block extra-block">
-          <div class="sticker-code ${kNotNeeded ? 'not-needed' : ''}">+ ${k}</div>
+          <div class="sticker-code ${kNotNeeded ? 'not-needed' : ''}">+ ${k}${side === 'doy' && !isChecked ? doyLiveStockNoteHtml(k) : ''}</div>
           <div class="sticker-label">${shortLabel(findLabelForKey(item.id, side, k))}${kNotNeededNote}</div>
           ${swapHtml}
           ${removeBtn}
