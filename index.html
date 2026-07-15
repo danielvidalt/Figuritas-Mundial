@@ -285,6 +285,8 @@
   .sticker-code { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 16px; }
   .sticker-label { font-size: 11.5px; color: var(--muted); margin-top: 1px; line-height: 1.25; }
   .value-note { color: var(--gold); font-style: italic; }
+  .sticker-code.not-needed { color: var(--red); }
+  .not-needed-note { display: block; color: var(--red); font-weight: 600; }
   .value-toggle {
     border: none; background: transparent; cursor: pointer; font-size: 12px;
     padding: 0 2px; opacity: 0.55; vertical-align: middle;
@@ -692,6 +694,10 @@ function tengoQty(code, num) {
 
 function necesitoHas(code, num) {
   const n = state.necesito[code];
+  return !!n && n.includes(num);
+}
+function personNeedsThis(personName, code, num) {
+  const n = state.people[personName].need[code];
   return !!n && n.includes(num);
 }
 
@@ -1614,6 +1620,18 @@ function renderTradeRow(item, isSpecial) {
   const doy = isSpecial ? stickerDisplay(item.doy_code, item.doy_num) : stickerKey;
   const realDoyLabel = isSpecial ? categoryLabelOf(item.doy_code, item.doy_num) : effectiveDoyLabel(item);
 
+  // Marca en rojo cuando un sticker del trato no figura en "necesito" (vos) o
+  // "necesita" (la otra persona) — normal en tratos armados a mano, donde a
+  // veces se incluye algo que no hace falta para el álbum pero igual se
+  // quiere (para revender o intercambiar más adelante).
+  const personNameForRow = pairPersonName(item.id);
+  const reciboCN = codeNumFromKey(recibo);
+  const doyCN = codeNumFromKey(doy);
+  const reciboNotNeeded = !necesitoHas(reciboCN.code, reciboCN.num);
+  const doyNotNeeded = !personNeedsThis(personNameForRow, doyCN.code, doyCN.num);
+  const reciboNotNeededNote = reciboNotNeeded ? `<span class="not-needed-note">🔴 Vos no lo necesitás</span>` : '';
+  const doyNotNeededNote = doyNotNeeded ? `<span class="not-needed-note">🔴 No lo necesita</span>` : '';
+
   const escId = item.id.replace(/'/g, "\\'");
   const ov = valueOverrides[item.id] || {};
   const reciboIsPremium = isPremiumLabel(realReciboLabel);
@@ -1700,14 +1718,14 @@ function renderTradeRow(item, isSpecial) {
       ${dragHandleHtml}
       <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${item.id.replace(/'/g, "\\'")}')" />
       <div class="sticker-block">
-        <div class="sticker-code">${recibo}</div>
-        <div class="sticker-label">${reciboLabel} ${reciboValueToggle}</div>
+        <div class="sticker-code ${reciboNotNeeded ? 'not-needed' : ''}">${recibo}</div>
+        <div class="sticker-label">${reciboLabel} ${reciboValueToggle}${reciboNotNeededNote}</div>
         ${reciboSwapHtml}
       </div>
       <div class="arrow">⇄${item.isManual && !isChecked ? `<button type="button" class="remove-manual-btn" title="Quitar este intercambio agregado a mano" onclick="removeManualPair('${pairPersonName(item.id).replace(/'/g, "\\'")}','${item.uid}')">✕</button>` : ''}</div>
       <div class="sticker-block">
-        <div class="sticker-code">${doy}</div>
-        <div class="sticker-label">${doyLabel} ${doyValueToggle}</div>
+        <div class="sticker-code ${doyNotNeeded ? 'not-needed' : ''}">${doy}</div>
+        <div class="sticker-label">${doyLabel} ${doyValueToggle}${doyNotNeededNote}</div>
         ${doySwapHtml}
       </div>
       ${note ? `<div class="stock-note-wrap" style="grid-column:1/6">${note}</div>` : ''}
@@ -1733,9 +1751,12 @@ function renderTradeRow(item, isSpecial) {
         }
       }
       const removeBtn = isChecked ? '' : `<button class="remove-extra-btn" onclick="removeExtra('${escId}','${side}',${i})">✕ quitar</button>`;
+      const kCN = codeNumFromKey(k);
+      const kNotNeeded = side === 'recibo' ? !necesitoHas(kCN.code, kCN.num) : !personNeedsThis(personNameForRow, kCN.code, kCN.num);
+      const kNotNeededNote = kNotNeeded ? `<span class="not-needed-note">🔴 ${side === 'recibo' ? 'Vos no lo necesitás' : 'No lo necesita'}</span>` : '';
       return `<div class="sticker-block extra-block">
-          <div class="sticker-code">+ ${k}</div>
-          <div class="sticker-label">${shortLabel(findLabelForKey(item.id, side, k))}</div>
+          <div class="sticker-code ${kNotNeeded ? 'not-needed' : ''}">+ ${k}</div>
+          <div class="sticker-label">${shortLabel(findLabelForKey(item.id, side, k))}${kNotNeededNote}</div>
           ${swapHtml}
           ${removeBtn}
         </div>`;
