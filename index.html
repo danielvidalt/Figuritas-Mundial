@@ -1102,11 +1102,26 @@ function initRowSortables() {
 
 function renderAll() {
   if (!loaded) return;
+  // Cada render reconstruye el HTML entero, lo que reinicia el scroll de la
+  // página y el de cada lista interna (.db-list tiene su propio overflow) a
+  // cero. Guardamos ambos antes de re-renderizar y los restauramos después,
+  // para no perder el lugar donde el usuario está trabajando (ej: borrando
+  // stickers uno a uno en una lista larga).
+  const winY = window.scrollY;
+  const listScrolls = {};
+  document.querySelectorAll('.db-list[id]').forEach(el => { listScrolls[el.id] = el.scrollTop; });
+
   _matchCache = {};
   renderTrades();
   renderDbInventario();
   renderDbPersonas();
   renderDbVentas();
+
+  window.scrollTo(0, winY);
+  for (const id in listScrolls) {
+    const el = document.getElementById(id);
+    if (el) el.scrollTop = listScrolls[id];
+  }
 }
 
 // ============================================================================
@@ -2250,7 +2265,7 @@ function renderDbPersonas() {
               ${numberGridHtml(pickerPersonHave[name], new Set(Object.keys(p.have[pickerPersonHave[name]] || {}).map(Number)), n => `togglePersonHaveNum('${escName}','${pickerPersonHave[name]}',${n})`)}
               ${collapseButtonHtml(pickerPersonHave[name], `collapsePersonHavePicker('${escName}')`)}
             </div>
-            <div class="db-list">${haveRows.length ? haveRows.map(r => {
+            <div class="db-list" id="haveList-${cid}">${haveRows.length ? haveRows.map(r => {
               const received = personReceivedCount(name, stickerDisplay(r.code, r.num));
               const note = received > 0 ? ` <span class="db-live-note">✅ Ya te lo dio</span>` : '';
               return `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)} ${r.qty > 1 ? `x${r.qty}` : ''}${note}</span><button class="del" onclick="removePersonHave('${escName}','${r.code}',${r.num})">✕</button></div>`;
@@ -2265,7 +2280,7 @@ function renderDbPersonas() {
               ${numberGridHtml(pickerPersonNeed[name], new Set(p.need[pickerPersonNeed[name]] || []), n => `togglePersonNeedNum('${escName}','${pickerPersonNeed[name]}',${n})`)}
               ${collapseButtonHtml(pickerPersonNeed[name], `collapsePersonNeedPicker('${escName}')`)}
             </div>
-            <div class="db-list">${needRows.length ? needRows.map(r => {
+            <div class="db-list" id="needList-${cid}">${needRows.length ? needRows.map(r => {
               const given = personGivenCount(name, stickerDisplay(r.code, r.num));
               const note = given > 0 ? ` <span class="db-live-note">✅ Ya se lo diste</span>` : '';
               return `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)}${note}</span><button class="del" onclick="removePersonNeed('${escName}','${r.code}',${r.num})">✕</button></div>`;
@@ -2380,7 +2395,7 @@ function renderDbVentas() {
           <div class="meet-field place" style="color:var(--ink)"><label style="color:var(--muted)">Lugar</label><input type="text" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" placeholder="Lugar de encuentro" data-person="${buyerKey}" value="${(meetPlace || '').replace(/"/g, '&quot;')}" onchange="updateMeet(this,'place')" /></div>
         </div>
         ${matches.length ? `<h3 style="font-family:'Barlow Condensed',sans-serif;font-size:15px;margin:0 0 6px;color:var(--pitch-dark)">Disponibles para vender ahora (${doneCount}/${matches.length})</h3>
-        <div class="db-list" style="margin-bottom:14px">${matches.map(item => renderSaleRow(sale.buyer, item)).join('')}</div>` : ''}
+        <div class="db-list" id="saleMatchesList-${cssId(sale.buyer)}" style="margin-bottom:14px">${matches.map(item => renderSaleRow(sale.buyer, item)).join('')}</div>` : ''}
         <div class="team-picker">
           <div class="team-picker-row">
             <select class="team-select" onchange="pickerSaleNeed['${escBuyer}']=this.value; renderDbVentas();">${teamOptionsHtml(pickerSaleNeed[sale.buyer])}</select>
@@ -2388,7 +2403,7 @@ function renderDbVentas() {
           ${numberGridHtml(pickerSaleNeed[sale.buyer], new Set(sale.need[pickerSaleNeed[sale.buyer]] || []), n => `toggleSaleNeedNum('${escBuyer}','${pickerSaleNeed[sale.buyer]}',${n})`)}
           ${collapseButtonHtml(pickerSaleNeed[sale.buyer], `collapseSaleNeedPicker('${escBuyer}')`)}
         </div>
-        <div class="db-list">${needRows.length ? needRows.map(r => {
+        <div class="db-list" id="saleNeedList-${cssId(sale.buyer)}">${needRows.length ? needRows.map(r => {
           const isAlto = (sale.precioAlto || []).some(([c, n]) => c === r.code && n === r.num);
           const has = tengoQty(r.code, r.num) > 0;
           return `<div class="db-row">
