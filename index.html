@@ -1242,6 +1242,27 @@ function removeExtra(pairId, side, index) {
   saveTrackingState();
   renderAll();
 }
+// Candidatos válidos para reemplazar un extra ya sumado — misma lógica de
+// disponibilidad real (tengo/necesito + stock) que el resto de la app, pero
+// siempre incluye la clave actual para que no desaparezca de su propio menú.
+function extraCandidates(pairId, side, currentKey) {
+  const personName = pairPersonName(pairId);
+  if (side === 'recibo') {
+    return personCandidates(personName)
+      .filter(c => c.key === currentKey || usedReciboCountForPerson(personName, c.key, '') < c.qty)
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }
+  return danielStockList()
+    .filter(c => personNeedList(personName).includes(c.key))
+    .filter(c => c.key === currentKey || (c.qty - usedCountFor(c.key, '')) > 0)
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+function swapExtra(pairId, side, index, newKey) {
+  if (!newKey) return;
+  extras[pairId][side][index] = newKey;
+  saveTrackingState();
+  renderAll();
+}
 function findPairById(pairId) {
   const personName = pairPersonName(pairId);
   const { pairs } = getMatches(personName);
@@ -1457,15 +1478,31 @@ function renderTradeRow(item, isSpecial) {
     const extraCell = (side, extrasArr) => {
       const k = extrasArr[i];
       if (!k) return '<div class="sticker-block empty-block"></div>';
-      const removeBtn = isChecked ? '' : `<button class="remove-extra-btn" onclick="removeExtra('${item.id.replace(/'/g, "\\'")}','${side}',${i})">✕ quitar</button>`;
+      const bucket = side === 'recibo' ? item.recibo_base_bucket : item.doy_base_bucket;
+      let swapHtml = '';
+      if (!isChecked) {
+        const candidates = extraCandidates(item.id, side, k);
+        if (candidates.length > 1) {
+          const same = candidates.filter(c => c.base_bucket === bucket);
+          const other = candidates.filter(c => c.base_bucket !== bucket);
+          const optHtml = c => `<option value="${c.key}" ${c.key === k ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
+          let opts = '';
+          if (same.length) opts += `<optgroup label="Misma categoría">${same.map(optHtml).join('')}</optgroup>`;
+          if (other.length) opts += `<optgroup label="Otras categorías">${other.map(optHtml).join('')}</optgroup>`;
+          swapHtml = `<select class="swap-select" onchange="swapExtra('${escId}','${side}',${i},this.value)">${opts}</select>`;
+        }
+      }
+      const removeBtn = isChecked ? '' : `<button class="remove-extra-btn" onclick="removeExtra('${escId}','${side}',${i})">✕ quitar</button>`;
       return `<div class="sticker-block extra-block">
           <div class="sticker-code">+ ${k}</div>
           <div class="sticker-label">${shortLabel(findLabelForKey(item.id, side, k))}</div>
+          ${swapHtml}
           ${removeBtn}
         </div>`;
     };
     html += `<div class="${rowClass} extra-row">
-        <div></div><div></div>
+        <div></div>
+        <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${escId}')" />
         ${extraCell('recibo', reciboExtras)}
         <div class="arrow"></div>
         ${extraCell('doy', doyExtras)}
