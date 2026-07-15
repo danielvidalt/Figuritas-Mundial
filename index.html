@@ -1436,10 +1436,14 @@ function manualCandidateOptionsHtml(personName, opts, side) {
     const qtyText = side === 'doy' ? ` (x${c.qty})` : '';
     return `<option value="${c.key.replace(/"/g, '&quot;')}"${style}>${prefix}${c.key}${qtyText} — ${shortLabel(c.label)}</option>`;
   };
-  let html = useful.map(optHtml).join('');
+  let html = '';
+  if (useful.length) {
+    const usefulLabel = side === 'doy' ? '✅ Lo que sí le sirve' : '✅ Lo que sí me sirve';
+    html += `<optgroup label="${usefulLabel}">${useful.map(optHtml).join('')}</optgroup>`;
+  }
   if (filler.length) {
-    const label = side === 'doy' ? '🟣 No le sirve — relleno disponible' : '🟣 No lo necesito — relleno disponible';
-    html += `<optgroup label="${label}">${filler.map(optHtml).join('')}</optgroup>`;
+    const fillerLabel = side === 'doy' ? '🟣 No le sirve — relleno disponible' : '🟣 No lo necesito — relleno disponible';
+    html += `<optgroup label="${fillerLabel}">${filler.map(optHtml).join('')}</optgroup>`;
   }
   return html;
 }
