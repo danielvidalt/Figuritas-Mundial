@@ -1728,11 +1728,12 @@ function countTradeStickers(personName) {
 }
 function buildTradeSummaryText(personName) {
   const person = state.people[personName];
+  const firstName = personName.split(' ')[0];
   const { special, pairs } = getMatches(personName);
   const meet = meetInfo[personName] || {};
   const meetPlace = meet.place !== undefined ? meet.place : person.meetPoint;
 
-  const lines = [`Intercambio entre : Daniel y ${personName}`];
+  const lines = [`Intercambio entre : Dani y ${firstName}`];
   lines.push(`Fecha: ${meet.date ? formatDateEs(meet.date) : ''}`);
   lines.push(`Horario: ${meet.time || ''}`);
   lines.push(`Lugar de encuentro: ${meetPlace || ''}`);
@@ -1741,18 +1742,18 @@ function buildTradeSummaryText(personName) {
   const { reciboCount, doyCount } = countTradeStickers(personName);
   const parejo = reciboCount === doyCount;
   if (!parejo) {
-    lines.push(`Daniel entrega: ${doyCount} stickers`);
-    lines.push(`${personName} entrega: ${reciboCount} stickers`);
+    lines.push(`Dani entrega: ${doyCount} stickers`);
+    lines.push(`${firstName} entrega: ${reciboCount} stickers`);
     lines.push('');
   }
 
   let itemCount = 0;
   const pushItem = (recibo, doy, done) => {
     itemCount++;
-    lines.push(`${done ? '✅ ' : ''}Daniel entrega ${keyWithPlayerName(doy)} y ${personName} entrega ${keyWithPlayerName(recibo)}.`);
+    lines.push(`${done ? '✅ ' : ''}Dani entrega ${keyWithPlayerName(doy)} y ${firstName} entrega ${keyWithPlayerName(recibo)}.`);
   };
   const pushExtra = (key, side) => {
-    lines.push(`   + ${side === 'doy' ? 'Daniel también entrega' : `${personName} también entrega`} ${keyWithPlayerName(key)}.`);
+    lines.push(`   + ${side === 'doy' ? 'Dani también entrega' : `${firstName} también entrega`} ${keyWithPlayerName(key)}.`);
   };
 
   if (special.length) {
