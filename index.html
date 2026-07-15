@@ -1737,9 +1737,11 @@ function buildTradeSummaryText(personName) {
   if (when) lines.push(`📅 ${when}${meetPlace ? ' · ' + meetPlace : ''}`);
   else if (meetPlace) lines.push(`📍 ${meetPlace}`);
   const { reciboCount, doyCount } = countTradeStickers(personName);
-  lines.push(`📊 ${personName} entrega: ${reciboCount} sticker${reciboCount === 1 ? '' : 's'}`);
-  lines.push(`   Daniel entrega: ${doyCount} sticker${doyCount === 1 ? '' : 's'}`);
-  lines.push('');
+  if (reciboCount !== doyCount) {
+    lines.push(`📊 ${personName} entrega: ${reciboCount} sticker${reciboCount === 1 ? '' : 's'}`);
+    lines.push(`   Daniel entrega: ${doyCount} sticker${doyCount === 1 ? '' : 's'}`);
+    lines.push('');
+  }
 
   let itemCount = 0;
   const pushItem = (recibo, doy, done) => {
@@ -2104,11 +2106,12 @@ function renderTrades() {
       }
       if (total > 0) {
         const { reciboCount, doyCount } = countTradeStickers(name);
+        const showCounts = reciboCount !== doyCount;
         html += `<div class="trade-row trade-row-header">
           <div></div><div></div>
-          <div class="col-label">📥 ${name.split(' ')[0]} entrega: <b>${reciboCount}</b> sticker${reciboCount === 1 ? '' : 's'}</div>
+          <div class="col-label">📥 ${name.split(' ')[0]} entrega${showCounts ? `: <b>${reciboCount}</b> sticker${reciboCount === 1 ? '' : 's'}` : ''}</div>
           <div></div>
-          <div class="col-label">📤 Daniel entrega: <b>${doyCount}</b> sticker${doyCount === 1 ? '' : 's'}</div>
+          <div class="col-label">📤 Daniel entrega${showCounts ? `: <b>${doyCount}</b> sticker${doyCount === 1 ? '' : 's'}` : ''}</div>
         </div>`;
       }
       if (special.length) {
