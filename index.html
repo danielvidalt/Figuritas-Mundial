@@ -1635,7 +1635,7 @@ function refreshAddCandidates(scopeSelectEl) {
   const scope = scopeSelectEl.value;
   const candidateSelect = scopeSelectEl.parentElement.querySelector('.add-extra-pick');
   const list = computeAddCandidates(pairId, side, scope);
-  candidateSelect.innerHTML = list.map(c => `<option value="${c.key}">${c.key} — ${shortLabel(c.label)}</option>`).join('') || '<option value="">(sin opciones disponibles)</option>';
+  candidateSelect.innerHTML = list.map(c => `<option value="${c.key}">${c.key}${side === 'doy' ? ` (x${c.qty})` : ''} — ${shortLabel(c.label)}</option>`).join('') || '<option value="">(sin opciones disponibles)</option>';
 }
 function confirmAddExtra(btnEl) {
   const pairId = btnEl.dataset.pair;
@@ -1968,7 +1968,7 @@ function renderTradeRow(item, isSpecial) {
     if (doyCandidates.length > 1) {
       const same = doyCandidates.filter(c => c.base_bucket === item.doy_base_bucket);
       const other = doyCandidates.filter(c => c.base_bucket !== item.doy_base_bucket);
-      const optHtml = c => `<option value="${c.key}" ${c.key === doy ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
+      const optHtml = c => `<option value="${c.key}" ${c.key === doy ? 'selected' : ''}>${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`;
       let opts = `<option value="">↺ Original: ${stickerDisplay(item.doy_code, item.doy_num)}</option>`;
       if (same.length) opts += `<optgroup label="Misma categoría">${same.map(optHtml).join('')}</optgroup>`;
       if (other.length) opts += `<optgroup label="Otras categorías">${other.map(optHtml).join('')}</optgroup>`;
@@ -1992,7 +1992,7 @@ function renderTradeRow(item, isSpecial) {
         <select class="add-extra-scope" data-pair="${item.id}" data-side="doy" onchange="refreshAddCandidates(this)">
           <option value="same">Misma categoría</option><option value="all">Todas las categorías</option>
         </select>
-        <select class="add-extra-pick">${doySameOpts.map(c => `<option value="${c.key}">${c.key} — ${shortLabel(c.label)}</option>`).join('') || '<option value="">(sin opciones)</option>'}</select>
+        <select class="add-extra-pick">${doySameOpts.map(c => `<option value="${c.key}">${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`).join('') || '<option value="">(sin opciones)</option>'}</select>
         <button data-pair="${item.id}" data-side="doy" onclick="confirmAddExtra(this)">+ sumar</button>
       </div>`;
     }
@@ -2033,7 +2033,7 @@ function renderTradeRow(item, isSpecial) {
         if (candidates.length > 1) {
           const same = candidates.filter(c => c.base_bucket === bucket);
           const other = candidates.filter(c => c.base_bucket !== bucket);
-          const optHtml = c => `<option value="${c.key}" ${c.key === k ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
+          const optHtml = c => `<option value="${c.key}" ${c.key === k ? 'selected' : ''}>${c.key}${side === 'doy' ? ` (x${c.qty})` : ''} — ${shortLabel(c.label)}</option>`;
           let opts = '';
           if (same.length) opts += `<optgroup label="Misma categoría">${same.map(optHtml).join('')}</optgroup>`;
           if (other.length) opts += `<optgroup label="Otras categorías">${other.map(optHtml).join('')}</optgroup>`;
@@ -2250,7 +2250,7 @@ function renderTrades() {
           <span class="manual-arrow">⇄</span>
           <select id="manualDoy-${cid}">
             <option value="">Elegí lo que le das${manualDoyOpts.length ? ` (${manualDoyOpts.length})` : ''}...</option>
-            ${manualDoyOpts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}">${c.key} — ${shortLabel(c.label)}</option>`).join('')}
+            ${manualDoyOpts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}">${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`).join('')}
           </select>
           <button type="button" onclick="confirmAddManualPair('${escName}')">+ Agregar</button>
         </div>`;
