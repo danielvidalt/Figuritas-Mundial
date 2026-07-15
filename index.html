@@ -862,7 +862,7 @@ let _matchCache = {};
 let personSortableInstances = [];
 let rowSortableInstances = [];
 let explodeSortableInstances = [];
-var explodedSections = new Set();
+var explodedPeople = new Set();
 var pendingCompletePerson = null;
 
 function getMatches(personName) {
@@ -1606,15 +1606,11 @@ function togglePersonCollapse(name) {
 // cambian — sólo qué sticker ocupa cada lado — así que reusa exactamente el
 // mismo mecanismo de swaps/doySwaps que ya usa el desplegable, nada nuevo
 // que persistir por separado.
-function explodeKeyOf(personName, sectionKey) {
-  return `${personName}::${sectionKey}`;
-}
-function toggleExplode(personName, sectionKey) {
-  const key = explodeKeyOf(personName, sectionKey);
-  if (explodedSections.has(key)) explodedSections.delete(key); else explodedSections.add(key);
+function toggleExplode(personName) {
+  if (explodedPeople.has(personName)) explodedPeople.delete(personName); else explodedPeople.add(personName);
   renderTrades();
 }
-function renderExplodedColumns(personName, sectionKey, orderedIds, byId) {
+function renderExplodedColumns(personName, orderedIds, byId) {
   let reciboHtml = '', doyHtml = '';
   for (const id of orderedIds) {
     const item = byId[id];
@@ -1646,8 +1642,8 @@ function renderExplodedColumns(personName, sectionKey, orderedIds, byId) {
   return `<div class="explode-columns">
       <div class="explode-col-header">📥 Recibís</div>
       <div class="explode-col-header">📤 Das</div>
-      <div class="explode-col" data-person-name="${escPerson}" data-section="${sectionKey}" data-side="recibo" data-slot-order="${slotOrderAttr}">${reciboHtml}</div>
-      <div class="explode-col" data-person-name="${escPerson}" data-section="${sectionKey}" data-side="doy" data-slot-order="${slotOrderAttr}">${doyHtml}</div>
+      <div class="explode-col" data-person-name="${escPerson}" data-side="recibo" data-slot-order="${slotOrderAttr}">${reciboHtml}</div>
+      <div class="explode-col" data-person-name="${escPerson}" data-side="doy" data-slot-order="${slotOrderAttr}">${doyHtml}</div>
     </div>
     <p class="explode-hint">↕ Arrastrá cada columna por separado — la fila resultante (misma posición en las dos) define el nuevo emparejamiento.</p>`;
 }
@@ -2023,19 +2019,33 @@ function renderTrades() {
         const secKey = tradeItemSectionKey(pr, false);
         (bySection[secKey] = bySection[secKey] || []).push(pr);
       }
-      for (const sec of TRADE_SECTIONS) {
-        const items = bySection[sec.key];
-        if (!items || !items.length) continue;
-        const byId = {};
-        for (const pr of items) byId[pr.id] = pr;
-        const orderedIds = syncSectionOrder(name, sec.key, items.map(pr => pr.id));
-        const isExploded = explodedSections.has(explodeKeyOf(name, sec.key));
-        html += `<div class="section-header">${sec.label} (${items.length})
-          <button type="button" class="explode-toggle" onclick="toggleExplode('${name.replace(/'/g, "\\'")}','${sec.key}')">${isExploded ? '🔒 Volver a filas' : '🔓 Reordenar por columnas'}</button>
+      const isExploded = explodedPeople.has(name);
+      if (pairs.length) {
+        html += `<div class="section-header">${isExploded ? '🔓 Todo junto (sin categorías)' : ''}
+          <button type="button" class="explode-toggle" onclick="toggleExplode('${name.replace(/'/g, "\\'")}')">${isExploded ? '🔒 Volver a categorías' : '🔓 Reordenar libre entre categorías'}</button>
         </div>`;
-        if (isExploded) {
-          html += renderExplodedColumns(name, sec.key, orderedIds, byId);
-        } else {
+      }
+      if (isExploded) {
+        // Combina TODAS las secciones en una sola columna por lado — así se
+        // puede arrastrar un sticker de cualquier categoría a cualquier otra
+        // sin la restricción de quedar encerrado dentro de su sección.
+        const allById = {};
+        let allOrderedIds = [];
+        for (const sec of TRADE_SECTIONS) {
+          const items = bySection[sec.key];
+          if (!items || !items.length) continue;
+          for (const pr of items) allById[pr.id] = pr;
+          allOrderedIds = allOrderedIds.concat(syncSectionOrder(name, sec.key, items.map(pr => pr.id)));
+        }
+        html += renderExplodedColumns(name, allOrderedIds, allById);
+      } else {
+        for (const sec of TRADE_SECTIONS) {
+          const items = bySection[sec.key];
+          if (!items || !items.length) continue;
+          const byId = {};
+          for (const pr of items) byId[pr.id] = pr;
+          const orderedIds = syncSectionOrder(name, sec.key, items.map(pr => pr.id));
+          html += `<div class="section-header">${sec.label} (${items.length})</div>`;
           html += `<div class="rows-list" data-person-name="${name.replace(/"/g, '&quot;')}" data-section="${sec.key}">`;
           for (const id of orderedIds) html += renderTradeRow(byId[id], false);
           html += `</div>`;
