@@ -18,6 +18,8 @@
     --muted: #6b6558;
     --red: #b3261e;
     --red-soft: #f6dedc;
+    --orange: #d9730d;
+    --orange-soft: #fbe6d0;
     --green-check: #2f7d4f;
     --green-soft: #e1f0e5;
     --card-radius: 10px;
@@ -325,6 +327,8 @@
   .not-needed-note { display: block; color: var(--red); font-weight: 600; }
   .live-stock-note { font-size: 10.5px; font-weight: 600; color: var(--muted); }
   .live-stock-note.danger { color: var(--red); }
+  .live-stock-note.conflict { color: var(--orange); font-weight: 700; }
+  .sticker-code.conflict { color: var(--orange); }
   .value-toggle {
     border: none; background: transparent; cursor: pointer; font-size: 12px;
     padding: 0 2px; opacity: 0.55; vertical-align: middle;
@@ -1239,6 +1243,7 @@ function renderAll() {
   document.querySelectorAll('.db-list[id]').forEach(el => { listScrolls[el.id] = el.scrollTop; });
 
   _matchCache = {};
+  _conflictCache = null;
   renderTrades();
   renderDbInventario();
   renderDbPersonas();
@@ -1565,16 +1570,6 @@ function doyLiveUsageCount(key) {
   }
   return count;
 }
-// Texto chico al lado del código, con cuánto queda disponible de ese
-// sticker una vez descontado TODO lo que ya está comprometido (aunque no
-// esté confirmado todavía) en cualquier intercambio.
-function doyLiveStockNoteHtml(key) {
-  const { code, num } = codeNumFromKey(key);
-  const total = tengoQty(code, num);
-  if (total <= 1) return '';
-  const remaining = total - doyLiveUsageCount(key);
-  return ` <span class="live-stock-note${remaining < 0 ? ' danger' : ''}">(quedan ${remaining})</span>`;
-}
 // Detecta conflictos de stock COMPARTIDO entre personas: un mismo sticker
 // mío (lado "doy") prometido, entre TODOS los intercambios pendientes de
 // TODAS las personas, más veces de las que tengo en stock. A propósito NO
@@ -1606,6 +1601,39 @@ function computeStockConflicts() {
   }
   conflicts.sort((a, b) => a.key.localeCompare(b.key));
   return conflicts;
+}
+// Mapa key -> conflicto, calculado una sola vez por render (computeStockConflicts
+// recorre a TODAS las personas, así que no conviene llamarlo por cada fila).
+// Se invalida junto con _matchCache en renderAll().
+let _conflictCache = null;
+function getStockConflictMap() {
+  if (!_conflictCache) {
+    _conflictCache = {};
+    for (const c of computeStockConflicts()) _conflictCache[c.key] = c;
+  }
+  return _conflictCache;
+}
+function doyConflictInfo(key) {
+  return getStockConflictMap()[key] || null;
+}
+// Texto chico al lado del código. Si el sticker está en conflicto real
+// (comprometido más veces de las que tengo en stock, aunque nada esté
+// confirmado todavía) muestra un aviso naranja nombrando con quién más se
+// cruza; si no hay conflicto pero tiene varias copias, muestra cuántas
+// quedan disponibles.
+function doyLiveStockNoteHtml(key, currentPersonName) {
+  const conflict = doyConflictInfo(key);
+  if (conflict) {
+    const others = conflict.people.filter(p => p !== currentPersonName);
+    const withWho = others.length ? ` con ${others.join(', ')}` : '';
+    return ` <span class="live-stock-note conflict">⚠ Conflicto de stock${withWho} — tenés ${conflict.total}, comprometido ${conflict.used} veces</span>`;
+  }
+  const { code, num } = codeNumFromKey(key);
+  const total = tengoQty(code, num);
+  if (total <= 1) return '';
+  const remaining = total - doyLiveUsageCount(key);
+  if (remaining >= total) return '';
+  return ` <span class="live-stock-note">(quedan ${remaining})</span>`;
 }
 
 // ============================================================================
@@ -2201,7 +2229,7 @@ function renderTradeRow(item, isSpecial) {
       </div>
       <div class="arrow">⇄${!isSpecial && !isChecked ? `<button type="button" class="remove-manual-btn" title="Quitar esta fila del intercambio" onclick="removeTradeRow('${escId}')">✕</button>` : ''}</div>
       <div class="sticker-block">
-        <div class="sticker-code ${doyNotNeeded ? 'not-needed' : ''}">${doy}${!isChecked ? doyLiveStockNoteHtml(doy) : ''}</div>
+        <div class="sticker-code ${doyNotNeeded ? 'not-needed' : ''} ${!isChecked && doyConflictInfo(doy) ? 'conflict' : ''}">${doy}${!isChecked ? doyLiveStockNoteHtml(doy, personNameForRow) : ''}</div>
         <div class="sticker-label">${doyLabel} ${doyValueToggle}${doyNotNeededNote}</div>
         ${doySwapHtml}
       </div>
@@ -2232,7 +2260,7 @@ function renderTradeRow(item, isSpecial) {
       const kNotNeeded = side === 'recibo' ? !necesitoHas(kCN.code, kCN.num) : !personNeedsThis(personNameForRow, kCN.code, kCN.num);
       const kNotNeededNote = kNotNeeded ? `<span class="not-needed-note">🔴 ${side === 'recibo' ? 'Vos no lo necesitás' : 'No lo necesita'}</span>` : '';
       return `<div class="sticker-block extra-block">
-          <div class="sticker-code ${kNotNeeded ? 'not-needed' : ''}">+ ${k}${side === 'doy' && !isChecked ? doyLiveStockNoteHtml(k) : ''}</div>
+          <div class="sticker-code ${kNotNeeded ? 'not-needed' : ''} ${side === 'doy' && !isChecked && doyConflictInfo(k) ? 'conflict' : ''}">+ ${k}${side === 'doy' && !isChecked ? doyLiveStockNoteHtml(k, personNameForRow) : ''}</div>
           <div class="sticker-label">${shortLabel(findLabelForKey(item.id, side, k))}${kNotNeededNote}</div>
           ${swapHtml}
           ${removeBtn}
