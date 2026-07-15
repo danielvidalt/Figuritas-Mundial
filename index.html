@@ -1787,6 +1787,95 @@ function editPersonFromTrades(name) {
 }
 
 // ============================================================================
+// BOTÓN "MATCH" — arma automáticamente, cruzando CUALQUIER categoría (no
+// sólo pares dentro del mismo bucket como hace el emparejamiento base), todo
+// lo que todavía sirve a ambas partes y queda en stock de las dos, para
+// tener una base pareja (misma cantidad de cada lado) que después se puede
+// personalizar a mano según cómo vaya la negociación.
+// ============================================================================
+function computeMatchAdditions(personName) {
+  const person = state.people[personName];
+  if (!person) return [];
+
+  // Lo que la persona tiene y a mí me sirve (necesito), con el cupo que le
+  // queda descontando lo que ya está usado en su trato actual.
+  const reciboSlots = [];
+  for (const code in person.have) {
+    for (const numStr in person.have[code]) {
+      const num = parseInt(numStr, 10);
+      if (!necesitoHas(code, num)) continue;
+      const key = stickerDisplay(code, num);
+      const remaining = person.have[code][numStr] - usedReciboCountForPerson(personName, key, '');
+      for (let i = 0; i < remaining; i++) reciboSlots.push(key);
+    }
+  }
+
+  // Lo que yo tengo y a ella le sirve (necesita), con el cupo que queda de
+  // mi stock real — descontando TODO lo ya comprometido en cualquier
+  // intercambio (con cualquier persona), no sólo lo confirmado.
+  const doySlots = [];
+  for (const code in person.need) {
+    for (const num of person.need[code]) {
+      const key = stickerDisplay(code, num);
+      const total = tengoQty(code, num);
+      if (total <= 0) continue;
+      const remaining = total - doyLiveUsageCount(key);
+      for (let i = 0; i < remaining; i++) doySlots.push(key);
+    }
+  }
+
+  reciboSlots.sort();
+  doySlots.sort();
+
+  const n = Math.min(reciboSlots.length, doySlots.length);
+  const additions = [];
+  for (let i = 0; i < n; i++) additions.push({ reciboKey: reciboSlots[i], doyKey: doySlots[i] });
+  return additions;
+}
+function addMatchAdditions(personName, additions) {
+  if (!manualPairs[personName]) manualPairs[personName] = [];
+  additions.forEach(({ reciboKey, doyKey }, i) => {
+    const r = codeNumFromKey(reciboKey);
+    const d = codeNumFromKey(doyKey);
+    const uid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}${i}`;
+    manualPairs[personName].push({ uid, recibo_code: r.code, recibo_num: r.num, doy_code: d.code, doy_num: d.num });
+  });
+}
+// "Match": agrega a la lista actual los cruces mutuos que todavía faltan,
+// sin tocar nada de lo que ya armaste a mano (swaps, extras, intercambios
+// manuales previos).
+function runMatch(personName) {
+  const additions = computeMatchAdditions(personName);
+  if (!additions.length) {
+    alert('No hay más cruces posibles: ya está todo lo que le sirve a ambas partes emparejado (o no queda stock disponible).');
+    return;
+  }
+  addMatchAdditions(personName, additions);
+  saveTrackingState();
+  renderAll();
+  alert(`✅ Se agregaron ${additions.length} intercambio${additions.length === 1 ? '' : 's'} nuevo${additions.length === 1 ? '' : 's'} a la lista.`);
+}
+// "Reiniciar Match": borra los cambios manuales de esa persona (swaps,
+// extras, intercambios agregados a mano, orden) y reconstruye la lista
+// desde cero con los pares automáticos + todos los cruces mutuos posibles.
+function runMatchReset(personName) {
+  if (!confirm(`¿Reiniciar el intercambio con ${personName}?\n\nEsto quita los stickers cambiados, los extras y los intercambios agregados a mano para esa persona, y arma de nuevo la lista base con todo lo que le sirve a ambas partes.`)) return;
+  delete manualPairs[personName];
+  delete rowOrder[personName];
+  for (const id of Object.keys(swaps)) if (pairPersonName(id) === personName) delete swaps[id];
+  for (const id of Object.keys(doySwaps)) if (pairPersonName(id) === personName) delete doySwaps[id];
+  for (const id of Object.keys(extras)) if (pairPersonName(id) === personName) delete extras[id];
+  for (const id of Object.keys(valueOverrides)) if (pairPersonName(id) === personName) delete valueOverrides[id];
+  for (const id of Array.from(checked)) if (pairPersonName(id) === personName) checked.delete(id);
+  _matchCache = {};
+  const additions = computeMatchAdditions(personName);
+  addMatchAdditions(personName, additions);
+  saveTrackingState();
+  renderAll();
+  alert(`✅ Intercambio con ${personName} reiniciado. Lista base: ${additions.length} intercambio${additions.length === 1 ? '' : 's'} agregado${additions.length === 1 ? '' : 's'} (además de los emparejados automáticamente).`);
+}
+
+// ============================================================================
 // EXPORTAR RESUMEN DE TEXTO — para copiar y mandar por mensaje una vez que
 // el trato con una persona está armado en el orden que se quiere.
 // ============================================================================
@@ -2183,6 +2272,8 @@ function renderTrades() {
         <div class="drag-handle" title="Arrastrar para reordenar">⠿</div>
         <div><div class="person-name">${name}</div><div class="person-meta">${person.location}</div></div>
         <div class="progress-chip">${done}/${total}</div>
+        <button type="button" class="edit-person-btn" title="Agregar a la lista actual todo lo que todavía sirve a ambas partes y está en stock de las dos (sin tocar lo que ya armaste a mano)" onclick="runMatch(this.closest('.person-card').dataset.personName)">🔗 Match</button>
+        <button type="button" class="edit-person-btn" title="Borrar los cambios manuales de esta persona y armar de nuevo la lista base con todo lo que sirve a ambas partes" onclick="runMatchReset(this.closest('.person-card').dataset.personName)">↻ Reiniciar Match</button>
         <button type="button" class="edit-person-btn" title="Editar lo que tiene/necesita esta persona en Base de Datos" onclick="editPersonFromTrades(this.closest('.person-card').dataset.personName)">✎ Editar</button>
         <button type="button" class="edit-person-btn" title="Copiar un resumen en texto del trato para mandarlo por mensaje" onclick="exportTradeSummary(this.closest('.person-card').dataset.personName)">📋 Copiar resumen</button>
         <button type="button" class="collapse-toggle" title="${isCollapsed ? 'Mostrar intercambios' : 'Ocultar intercambios'}" onclick="togglePersonCollapse(this.closest('.person-card').dataset.personName)">${isCollapsed ? '▸' : '▾'}</button>
