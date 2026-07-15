@@ -223,13 +223,22 @@
   .meet-field.place input { min-width: 180px; }
 
   .trade-row {
-    display: grid; grid-template-columns: 26px 1fr 22px 1fr;
-    align-items: start; gap: 10px; padding: 11px 16px;
+    display: grid; grid-template-columns: 16px 26px 1fr 22px 1fr;
+    align-items: start; gap: 8px; padding: 11px 16px;
     border-top: 1px solid var(--paper-line);
   }
   .trade-row.special { background: var(--gold-soft); }
   .trade-row.done { background: var(--green-soft); }
   .trade-row.blocked { background: var(--red-soft); opacity: 0.75; }
+  .row-drag-handle { cursor: grab; touch-action: none; color: var(--muted); font-size: 13px; line-height: 1; padding-top: 4px; text-align: center; }
+  .row-drag-handle:active { cursor: grabbing; }
+  .rows-list .trade-row.sortable-ghost { opacity: 0.35; }
+  .rows-list .trade-row.sortable-drag, .rows-list .trade-row.sortable-fallback { box-shadow: 0 6px 18px rgba(0,0,0,0.2); background: #fffdf7; }
+  .section-header {
+    padding: 8px 16px 4px; border-top: 1px solid var(--paper-line);
+    font-family: 'Barlow Condensed', sans-serif; font-size: 12.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.03em; color: var(--pitch-dark); background: var(--paper);
+  }
   .trade-row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--green-check); cursor: pointer; margin-top: 2px; }
   .trade-row input[type=checkbox]:disabled { cursor: not-allowed; }
   .sticker-block { min-width: 0; }
@@ -256,7 +265,7 @@
     font-family: 'Barlow Condensed', sans-serif; font-size: 10.5px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
   }
-  .stock-note { grid-column: 2 / 5; font-size: 11.5px; font-family: 'Barlow Condensed', sans-serif; margin-top: 2px; }
+  .stock-note { grid-column: 3 / 6; font-size: 11.5px; font-family: 'Barlow Condensed', sans-serif; margin-top: 2px; }
   .stock-note.blocked-text { color: var(--red); font-weight: 600; }
   .stock-note.low-text { color: var(--gold); font-weight: 600; }
 
@@ -386,7 +395,7 @@
   .new-person-form button { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px; text-transform: uppercase; background: var(--gold); color: var(--pitch-dark); border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; }
 
   @media (max-width: 480px) {
-    .trade-row { grid-template-columns: 22px 1fr 16px 1fr; padding: 10px 12px; }
+    .trade-row { grid-template-columns: 14px 22px 1fr 16px 1fr; padding: 10px 12px; gap: 6px; }
     .sticker-code { font-size: 14px; }
   }
 </style>
@@ -505,6 +514,21 @@ function baseBucket(code, num) {
   if (cat === 'Hologram equipo (#1)' || cat === 'Foto equipo (#13)') return cat;
   if (cat === 'Especial FWC') return `Especial FWC | ${code}`;
   return cat;
+}
+
+// Subdivide la lista de intercambio de cada persona en secciones legibles
+// (Especiales / Destacados / Holograma / Foto equipo / Normales), en base al
+// mismo bucket que ya usa el motor de emparejamiento.
+const TRADE_SECTIONS = [
+  { key: 'especiales', label: '🏷️ Especiales', match: b => b.startsWith('Especial FWC') },
+  { key: 'destacados', label: '⭐ Jugadores Destacados', match: b => b === 'Premium' },
+  { key: 'holograma', label: '◆ Holograma (#1)', match: b => b === 'Hologram equipo (#1)' },
+  { key: 'foto', label: '📷 Foto Equipo (#13)', match: b => b === 'Foto equipo (#13)' },
+  { key: 'normales', label: '👤 Normales', match: b => b === 'Jugador' },
+];
+function sectionKeyOf(baseBucketValue) {
+  const found = TRADE_SECTIONS.find(s => s.match(baseBucketValue));
+  return found ? found.key : 'normales';
 }
 
 function categoryLabelOf(code, num) {
@@ -675,6 +699,7 @@ var doySwaps = {};
 var extras = {};
 var meetInfo = {};
 var valueOverrides = {};
+var rowOrder = {};
 var personOrder = [];
 var sortMode = 'chrono';
 var loaded = false;
@@ -696,6 +721,7 @@ var pickerPersonNeed = {};
 var pickerSaleNeed = {};
 let _matchCache = {};
 let sortableInstance = null;
+let rowSortableInstances = [];
 
 function getMatches(personName) {
   if (!_matchCache[personName]) _matchCache[personName] = computePersonMatches(personName);
@@ -790,6 +816,10 @@ async function loadAll() {
     if (r && r.value) personOrder = JSON.parse(r.value);
   } catch (e) {}
   try {
+    const r = await window.storage.get('panini-tracker-roworder', false);
+    if (r && r.value) rowOrder = JSON.parse(r.value);
+  } catch (e) {}
+  try {
     const r = await window.storage.get('panini-tracker-valueoverrides', false);
     if (r && r.value) valueOverrides = JSON.parse(r.value);
   } catch (e) {}
@@ -815,6 +845,7 @@ async function saveTrackingState() {
     await window.storage.set('panini-tracker-meet', JSON.stringify(meetInfo), false);
     await window.storage.set('panini-tracker-valueoverrides', JSON.stringify(valueOverrides), false);
     await window.storage.set('panini-tracker-order', JSON.stringify(personOrder), false);
+    await window.storage.set('panini-tracker-roworder', JSON.stringify(rowOrder), false);
   } catch (e) { console.error('No se pudo guardar el progreso', e); }
 }
 
@@ -856,6 +887,19 @@ function syncPersonOrder() {
   if (wasEmpty) result = result.slice().sort(chronoCompare);
   personOrder = result;
   return personOrder;
+}
+
+// Orden manual de las filas de intercambio DENTRO de una sección de una
+// persona (ej: arrastrar dentro de "Especiales"). Independiente del orden de
+// las tarjetas de personas.
+function syncSectionOrder(personName, sectionKey, idsInSection) {
+  if (!rowOrder[personName]) rowOrder[personName] = {};
+  const existing = rowOrder[personName][sectionKey] || [];
+  const kept = existing.filter(id => idsInSection.includes(id));
+  const added = idsInSection.filter(id => !kept.includes(id));
+  const result = [...kept, ...added];
+  rowOrder[personName][sectionKey] = result;
+  return result;
 }
 
 function sortChronological() {
@@ -902,6 +946,31 @@ function initPeopleSortable() {
       saveTrackingState();
       document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
     },
+  });
+}
+
+// Un Sortable independiente por cada sección (Especiales/Destacados/.../de
+// cada persona), para poder reordenar las filas dentro de esa categoría sin
+// mezclarlas con otra.
+function initRowSortables() {
+  rowSortableInstances.forEach(inst => inst.destroy());
+  rowSortableInstances = [];
+  if (typeof Sortable === 'undefined') return;
+  document.querySelectorAll('#peopleList .rows-list').forEach(el => {
+    const inst = new Sortable(el, {
+      handle: '.row-drag-handle',
+      animation: 150,
+      forceFallback: true,
+      fallbackTolerance: 3,
+      onEnd: function () {
+        const personName = el.dataset.personName;
+        const sectionKey = el.dataset.section;
+        if (!rowOrder[personName]) rowOrder[personName] = {};
+        rowOrder[personName][sectionKey] = Array.from(el.children).map(child => child.dataset.rowId);
+        saveTrackingState();
+      },
+    });
+    rowSortableInstances.push(inst);
   });
 }
 
@@ -1213,25 +1282,31 @@ function renderTradeRow(item, isSpecial) {
     const personName = pairPersonName(item.id);
 
     const isReciboOverridden = !!swaps[item.id];
-    const reciboOptions = personCandidates(personName)
-      .filter(c => c.base_bucket === item.recibo_base_bucket)
+    const reciboCandidates = personCandidates(personName)
       .filter(c => c.key === recibo || usedReciboCountForPerson(personName, c.key, item.id) < c.qty)
       .sort((a, b) => a.key.localeCompare(b.key));
-    if (reciboOptions.length > 1) {
+    if (reciboCandidates.length > 1) {
+      const same = reciboCandidates.filter(c => c.base_bucket === item.recibo_base_bucket);
+      const other = reciboCandidates.filter(c => c.base_bucket !== item.recibo_base_bucket);
+      const optHtml = c => `<option value="${c.key}" ${c.key === recibo ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
       let opts = `<option value="">↺ Original: ${stickerDisplay(item.recibo_code, item.recibo_num)}</option>`;
-      for (const c of reciboOptions) opts += `<option value="${c.key}" ${c.key === recibo ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
+      if (same.length) opts += `<optgroup label="Misma categoría">${same.map(optHtml).join('')}</optgroup>`;
+      if (other.length) opts += `<optgroup label="Otras categorías">${other.map(optHtml).join('')}</optgroup>`;
       reciboSwapHtml = `<select class="swap-select ${isReciboOverridden ? 'overridden' : ''}" data-pair="${item.id}" onchange="swapRecibo(this)" ${isChecked ? 'disabled' : ''}>${opts}</select>`;
     }
 
     const isDoyOverridden = !!doySwaps[item.id];
-    const doyOptions = danielStockList()
-      .filter(c => c.base_bucket === item.doy_base_bucket)
+    const doyCandidates = danielStockList()
       .filter(c => personNeedList(personName).includes(c.key))
       .filter(c => c.key === doy || (c.qty - usedCountFor(c.key, item.id)) > 0)
       .sort((a, b) => a.key.localeCompare(b.key));
-    if (doyOptions.length > 1) {
+    if (doyCandidates.length > 1) {
+      const same = doyCandidates.filter(c => c.base_bucket === item.doy_base_bucket);
+      const other = doyCandidates.filter(c => c.base_bucket !== item.doy_base_bucket);
+      const optHtml = c => `<option value="${c.key}" ${c.key === doy ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
       let opts = `<option value="">↺ Original: ${stickerDisplay(item.doy_code, item.doy_num)}</option>`;
-      for (const c of doyOptions) opts += `<option value="${c.key}" ${c.key === doy ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
+      if (same.length) opts += `<optgroup label="Misma categoría">${same.map(optHtml).join('')}</optgroup>`;
+      if (other.length) opts += `<optgroup label="Otras categorías">${other.map(optHtml).join('')}</optgroup>`;
       doySwapHtml = `<select class="swap-select ${isDoyOverridden ? 'overridden' : ''}" data-pair="${item.id}" onchange="swapDoy(this)" ${isChecked ? 'disabled' : ''}>${opts}</select>`;
     }
 
@@ -1264,7 +1339,10 @@ function renderTradeRow(item, isSpecial) {
     }
   }
 
-  return `<div class="${rowClass}">
+  const dragHandleHtml = isSpecial ? '<div></div>' : '<div class="row-drag-handle" title="Arrastrar para reordenar dentro de esta categoría">⠿</div>';
+
+  return `<div class="${rowClass}" data-row-id="${item.id.replace(/"/g, '&quot;')}">
+      ${dragHandleHtml}
       <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${item.id.replace(/'/g, "\\'")}')" />
       <div class="sticker-block">
         <div class="sticker-code">${recibo}</div>
@@ -1277,7 +1355,7 @@ function renderTradeRow(item, isSpecial) {
         <div class="sticker-label">${doyLabel} ${doyValueToggle}</div>
         ${doySwapHtml}${doyExtrasHtml}${doyAddHtml}
       </div>
-      ${note ? `<div class="stock-note-wrap" style="grid-column:1/5">${note}</div>` : ''}
+      ${note ? `<div class="stock-note-wrap" style="grid-column:1/6">${note}</div>` : ''}
     </div>`;
 }
 
@@ -1391,14 +1469,32 @@ function renderTrades() {
       }
       if (total > 0) {
         peopleHtml += `<div class="trade-row trade-row-header">
-          <div></div>
+          <div></div><div></div>
           <div class="col-label">📥 Recibís (te da ${name.split(' ')[0]})</div>
           <div></div>
           <div class="col-label">📤 Das (le das vos)</div>
         </div>`;
       }
-      for (const s of special) peopleHtml += renderTradeRow(s, true);
-      for (const pr of pairs) peopleHtml += renderTradeRow(pr, false);
+      if (special.length) {
+        peopleHtml += `<div class="section-header">🤝 Trato Especial (${special.length})</div>`;
+        for (const s of special) peopleHtml += renderTradeRow(s, true);
+      }
+      const bySection = {};
+      for (const pr of pairs) {
+        const secKey = sectionKeyOf(pr.recibo_base_bucket);
+        (bySection[secKey] = bySection[secKey] || []).push(pr);
+      }
+      for (const sec of TRADE_SECTIONS) {
+        const items = bySection[sec.key];
+        if (!items || !items.length) continue;
+        const byId = {};
+        for (const pr of items) byId[pr.id] = pr;
+        const orderedIds = syncSectionOrder(name, sec.key, items.map(pr => pr.id));
+        peopleHtml += `<div class="section-header">${sec.label} (${items.length})</div>`;
+        peopleHtml += `<div class="rows-list" data-person-name="${name.replace(/"/g, '&quot;')}" data-section="${sec.key}">`;
+        for (const id of orderedIds) peopleHtml += renderTradeRow(byId[id], false);
+        peopleHtml += `</div>`;
+      }
       peopleHtml += `</div>`;
     }
     peopleHtml += `</div>`;
@@ -1407,6 +1503,7 @@ function renderTrades() {
   document.getElementById('page-trades').innerHTML = sortBarHtml + `<div id="peopleList">${peopleHtml}</div>`;
   document.getElementById('footerText').innerHTML = 'Marca un intercambio como hecho apenas lo confirmes en persona. Si el mismo sticker tuyo está comprometido en otro trato, ese trato se bloquea automáticamente. Cada lado tiene su propio menú para cambiar de sticker, y un cuadro para sumar stickers extra cuando uno vale más que el otro. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
   initPeopleSortable();
+  initRowSortables();
   updateHeaderHeightVar();
 }
 
