@@ -499,6 +499,15 @@
     .trade-row { grid-template-columns: 14px 22px 1fr 16px 1fr; padding: 10px 12px; gap: 6px; }
     .sticker-code { font-size: 14px; }
   }
+
+  #floatingWarning {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(12px);
+    background: var(--red); color: #fff; padding: 12px 18px; border-radius: 10px;
+    font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; line-height: 1.4;
+    max-width: min(92vw, 420px); box-shadow: 0 6px 20px rgba(0,0,0,0.3); z-index: 9999;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  #floatingWarning.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
@@ -1345,6 +1354,7 @@ function addManualPair(personName, reciboKey, doyKey) {
   manualPairs[personName].push({ uid, recibo_code: r.code, recibo_num: r.num, doy_code: d.code, doy_num: d.num });
   saveTrackingState();
   renderAll();
+  warnIfDoyDuplicate(personName, doyKey);
 }
 function confirmAddManualPair(personName) {
   const cid = cssId(personName);
@@ -1500,12 +1510,49 @@ function tradeItemSectionKey(item, isSpecial) {
   for (const k of getExtras(item.id, 'doy')) buckets.push(bucketOfKey(k));
   return mostValuableSectionKey(buckets);
 }
+// Aviso flotante genérico (no bloqueante) — usado para alertar cuando se
+// elige, por duplicado, entregar el mismo sticker más de una vez en un
+// mismo trato.
+let floatingWarningTimer = null;
+function showFloatingWarning(msg) {
+  let el = document.getElementById('floatingWarning');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'floatingWarning';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  clearTimeout(floatingWarningTimer);
+  requestAnimationFrame(() => el.classList.add('show'));
+  floatingWarningTimer = setTimeout(() => el.classList.remove('show'), 5000);
+}
+// Cuenta cuántas veces se está entregando cada sticker (lado "doy") dentro
+// del trato con una persona — pares, extras y trato especial incluidos.
+function personDoyKeyCounts(personName) {
+  const { special, pairs } = getMatches(personName);
+  const counts = {};
+  const bump = k => { counts[k] = (counts[k] || 0) + 1; };
+  for (const s of special) bump(stickerDisplay(s.doy_code, s.doy_num));
+  for (const pr of pairs) {
+    bump(effectiveDoy(pr));
+    for (const k of getExtras(pr.id, 'doy')) bump(k);
+  }
+  return counts;
+}
+function warnIfDoyDuplicate(personName, key) {
+  const n = personDoyKeyCounts(personName)[key] || 0;
+  if (n <= 1) return;
+  const { code, num } = codeNumFromKey(key);
+  const stock = tengoQty(code, num);
+  showFloatingWarning(`⚠ Estás entregando ${key} ${n} veces en este intercambio. Tenés ${stock} en stock.`);
+}
 function addExtra(pairId, side, key) {
   if (!key) return;
   if (!extras[pairId]) extras[pairId] = { recibo: [], doy: [] };
   extras[pairId][side].push(key);
   saveTrackingState();
   renderAll();
+  if (side === 'doy') warnIfDoyDuplicate(pairPersonName(pairId), key);
 }
 function removeExtra(pairId, side, index) {
   extras[pairId][side].splice(index, 1);
@@ -1532,6 +1579,7 @@ function swapExtra(pairId, side, index, newKey) {
   extras[pairId][side][index] = newKey;
   saveTrackingState();
   renderAll();
+  if (side === 'doy') warnIfDoyDuplicate(pairPersonName(pairId), newKey);
 }
 function findPairById(pairId) {
   const personName = pairPersonName(pairId);
@@ -1595,6 +1643,7 @@ function swapDoy(selectEl) {
   if (value === '') delete doySwaps[pairId]; else doySwaps[pairId] = value;
   saveTrackingState();
   renderAll();
+  if (value) warnIfDoyDuplicate(pairPersonName(pairId), value);
 }
 function updateMeet(inputEl, field) {
   const person = inputEl.dataset.person;
