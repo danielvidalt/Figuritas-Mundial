@@ -592,7 +592,10 @@ function displayTeam(code) {
 }
 
 function stickerDisplay(code, num) {
-  return `${displayTeam(code)} ${num}`;
+  // Los FWC se numeran con dos dígitos en el álbum real (00, 01, ... 19) —
+  // sin el padding, "FWC 00" se mostraba como "FWC 0" en todas las listas.
+  const numText = code.startsWith('FWC') ? String(num).padStart(2, '0') : String(num);
+  return `${displayTeam(code)} ${numText}`;
 }
 
 function bucketKey(code, num) {
