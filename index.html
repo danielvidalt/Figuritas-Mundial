@@ -1698,6 +1698,79 @@ function editPersonFromTrades(name) {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// ============================================================================
+// EXPORTAR RESUMEN DE TEXTO — para copiar y mandar por mensaje una vez que
+// el trato con una persona está armado en el orden que se quiere.
+// ============================================================================
+function formatDateEs(isoDate) {
+  const parts = isoDate.split('-');
+  return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : isoDate;
+}
+function buildTradeSummaryText(personName) {
+  const person = state.people[personName];
+  const { special, pairs } = getMatches(personName);
+  const meet = meetInfo[personName] || {};
+  const meetPlace = meet.place !== undefined ? meet.place : person.meetPoint;
+
+  const lines = [`📦 Intercambio con ${personName}`];
+  const when = [meet.date ? formatDateEs(meet.date) : '', meet.time || ''].filter(Boolean).join(' - ');
+  if (when) lines.push(`📅 ${when}${meetPlace ? ' · ' + meetPlace : ''}`);
+  else if (meetPlace) lines.push(`📍 ${meetPlace}`);
+  lines.push('');
+
+  let itemCount = 0;
+  const pushItem = (recibo, doy, done) => {
+    itemCount++;
+    lines.push(`${done ? '✅' : '•'} Te doy ${doy} — me das ${recibo}`);
+  };
+  const pushExtra = (key, side) => {
+    lines.push(`   + ${side === 'doy' ? 'también te doy' : 'también me das'} ${key}`);
+  };
+
+  if (special.length) {
+    lines.push('🤝 Trato especial:');
+    for (const s of special) {
+      pushItem(stickerDisplay(s.recibo_code, s.recibo_num), stickerDisplay(s.doy_code, s.doy_num), checked.has(s.id));
+    }
+    lines.push('');
+  }
+
+  const bySection = {};
+  for (const pr of pairs) {
+    const secKey = tradeItemSectionKey(pr, false);
+    (bySection[secKey] = bySection[secKey] || []).push(pr);
+  }
+  for (const sec of TRADE_SECTIONS) {
+    const items = bySection[sec.key];
+    if (!items || !items.length) continue;
+    const byId = {};
+    for (const pr of items) byId[pr.id] = pr;
+    const orderedIds = syncSectionOrder(personName, sec.key, items.map(pr => pr.id));
+    lines.push(`${sec.label}:`);
+    for (const id of orderedIds) {
+      const item = byId[id];
+      pushItem(effectiveRecibo(item), effectiveDoy(item), checked.has(item.id));
+      for (const k of getExtras(item.id, 'recibo')) pushExtra(k, 'recibo');
+      for (const k of getExtras(item.id, 'doy')) pushExtra(k, 'doy');
+    }
+    lines.push('');
+  }
+
+  lines.push(`Total: ${itemCount} intercambio${itemCount === 1 ? '' : 's'}`);
+  return lines.join('\n').trim();
+}
+function exportTradeSummary(personName) {
+  const text = buildTradeSummaryText(personName);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => alert('✅ Resumen copiado al portapapeles. Ya lo podés pegar donde quieras enviarlo.'),
+      () => prompt('No se pudo copiar automáticamente. Copiá el texto manualmente:', text)
+    );
+  } else {
+    prompt('Copiá el texto manualmente:', text);
+  }
+}
+
 // Ajuste de valor manual, sólo para un trato puntual (no toca la base de
 // datos): permite mostrar un jugador destacado como si fuera un Jugador
 // normal para negociar ese intercambio específico.
@@ -1992,6 +2065,7 @@ function renderTrades() {
         <div><div class="person-name">${name}</div><div class="person-meta">${person.location}</div></div>
         <div class="progress-chip">${done}/${total}</div>
         <button type="button" class="edit-person-btn" title="Editar lo que tiene/necesita esta persona en Base de Datos" onclick="editPersonFromTrades(this.closest('.person-card').dataset.personName)">✎ Editar</button>
+        <button type="button" class="edit-person-btn" title="Copiar un resumen en texto del trato para mandarlo por mensaje" onclick="exportTradeSummary(this.closest('.person-card').dataset.personName)">📋 Copiar resumen</button>
         <button type="button" class="collapse-toggle" title="${isCollapsed ? 'Mostrar intercambios' : 'Ocultar intercambios'}" onclick="togglePersonCollapse(this.closest('.person-card').dataset.personName)">${isCollapsed ? '▸' : '▾'}</button>
         <div class="meet-edit-row">
           <div class="meet-field"><label>Fecha</label><input type="date" data-person="${name}" value="${meetDate}" onchange="updateMeet(this,'date')" />${!meetDate ? '<span class="meet-undefined">Sin definir</span>' : ''}</div>
