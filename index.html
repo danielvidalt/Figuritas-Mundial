@@ -142,6 +142,19 @@
     flex-shrink: 0;
   }
   .collapse-toggle:hover { background: rgba(255,255,255,0.2); }
+  .edit-person-btn {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.25);
+    color: var(--gold-soft);
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .edit-person-btn:hover { background: rgba(255,255,255,0.2); }
   .drag-handle {
     cursor: grab;
     touch-action: none;
@@ -1388,6 +1401,19 @@ function togglePersonCollapse(name) {
   renderTrades();
 }
 
+// Atajo desde la tarjeta de una persona en Intercambios hacia su ficha en
+// Base de Datos > Personas, ya abierta y a la vista, para agregar/sacar lo
+// que tiene o necesita sin perder el hilo. Como todo se re-renderiza desde
+// el mismo `state`, cualquier cambio ahí se refleja al instante al volver.
+function editPersonFromTrades(name) {
+  openPersonName = name;
+  switchTab('db');
+  switchDbSub('personas');
+  renderDbPersonas();
+  const el = document.getElementById(`person-manage-${cssId(name)}`);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 // Ajuste de valor manual, sólo para un trato puntual (no toca la base de
 // datos): permite mostrar un jugador destacado como si fuera un Jugador
 // normal para negociar ese intercambio específico.
@@ -1666,6 +1692,7 @@ function renderTrades() {
         <div class="drag-handle" title="Arrastrar para reordenar">⠿</div>
         <div><div class="person-name">${name}</div><div class="person-meta">${person.location}</div></div>
         <div class="progress-chip">${done}/${total}</div>
+        <button type="button" class="edit-person-btn" title="Editar lo que tiene/necesita esta persona en Base de Datos" onclick="editPersonFromTrades(this.closest('.person-card').dataset.personName)">✎ Editar</button>
         <button type="button" class="collapse-toggle" title="${isCollapsed ? 'Mostrar intercambios' : 'Ocultar intercambios'}" onclick="togglePersonCollapse(this.closest('.person-card').dataset.personName)">${isCollapsed ? '▸' : '▾'}</button>
         <div class="meet-edit-row">
           <div class="meet-field"><label>Fecha</label><input type="date" data-person="${name}" value="${meetDate}" onchange="updateMeet(this,'date')" />${!meetDate ? '<span class="meet-undefined">Sin definir</span>' : ''}</div>
@@ -2114,7 +2141,7 @@ function renderDbPersonas() {
     for (const code in p.need) for (const num of p.need[code]) needRows.push({ code, num });
     needRows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
 
-    html += `<div class="person-manage-card">
+    html += `<div class="person-manage-card" id="person-manage-${cid}">
       <div class="person-manage-head">
         <div class="info"><div class="name">${name}</div><div class="count">${p.location || '(sin ubicación)'} · Tiene ${haveCount} · Necesita ${needCount}</div></div>
         <div class="person-manage-actions">
