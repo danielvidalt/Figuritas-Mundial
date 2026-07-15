@@ -380,7 +380,14 @@
   .db-subtab-btn.active { background: var(--pitch); color: var(--paper); border-color: var(--pitch); }
 
   .db-section { background: #fffdf7; border: 1px solid var(--paper-line); border-radius: var(--card-radius); padding: 16px; margin-bottom: 18px; }
+  .db-section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .db-section h2 { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; margin: 0 0 4px; color: var(--pitch-dark); }
+  .db-export-btn {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 12.5px; text-transform: uppercase;
+    background: var(--gold); color: var(--pitch-dark); border: none; border-radius: 999px; padding: 6px 14px; cursor: pointer;
+    flex-shrink: 0; white-space: nowrap;
+  }
+  .db-export-btn:hover { background: #b6901f; }
   .db-section .db-sub { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
 
   .db-filter { width: 100%; padding: 7px 10px; border: 1px solid var(--paper-line); border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 13px; margin-bottom: 10px; }
@@ -2280,6 +2287,43 @@ function buildTengoSubtotalHtml() {
   const filteredCopies = filtered.reduce((a, r) => a + r.qty, 0);
   return `<div class="db-subtotal">Mostrando <b>${filtered.length}</b> de <b>${all.length}</b> stickers únicos (<b>${filteredCopies}</b> copias) — de un total de <b>${totalCopies}</b> copias disponibles${outPart}</div>`;
 }
+// Texto para copiar y compartir: todo lo que sigue disponible para
+// intercambiar (stock > 0), agrupado por categoría y con la cantidad
+// actual de cada sticker.
+function buildTengoSummaryText() {
+  const { all } = tengoFilteredRows();
+  const available = all.filter(r => r.qty > 0);
+  const bySection = {};
+  for (const r of available) {
+    const secKey = sectionKeyOf(bucketOfKey(stickerDisplay(r.code, r.num)));
+    (bySection[secKey] = bySection[secKey] || []).push(r);
+  }
+  const lines = ['📦 Tengo disponible para intercambiar:', ''];
+  let totalCopies = 0;
+  for (const sec of TRADE_SECTIONS) {
+    const items = bySection[sec.key];
+    if (!items || !items.length) continue;
+    lines.push(`${sec.label}:`);
+    for (const r of items) {
+      totalCopies += r.qty;
+      lines.push(`${keyWithPlayerName(stickerDisplay(r.code, r.num))} x${r.qty}`);
+    }
+    lines.push('');
+  }
+  lines.push(`Total: ${available.length} stickers únicos, ${totalCopies} copias disponibles`);
+  return lines.join('\n').trim();
+}
+function exportTengoSummary() {
+  const text = buildTengoSummaryText();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => alert('✅ Resumen copiado al portapapeles. Ya lo podés pegar donde quieras enviarlo.'),
+      () => prompt('No se pudo copiar automáticamente. Copiá el texto manualmente:', text)
+    );
+  } else {
+    prompt('Copiá el texto manualmente:', text);
+  }
+}
 function necesitoFilteredRows() {
   const all = [];
   for (const code in state.necesito) for (const num of state.necesito[code]) all.push({ code, num });
@@ -2477,7 +2521,10 @@ function renderDbInventario() {
   const necesitoCount = Object.values(state.necesito).reduce((a, arr) => a + arr.length, 0);
   el.innerHTML = `
     <div class="db-section">
-      <h2>Tengo para intercambiar <span style="color:var(--muted);font-size:13px">(${tengoCount})</span></h2>
+      <div class="db-section-title-row">
+        <h2>Tengo para intercambiar <span style="color:var(--muted);font-size:13px">(${tengoCount})</span></h2>
+        <button type="button" class="db-export-btn" title="Copiar en texto todo lo que tenés disponible para intercambiar, con la cantidad de cada sticker" onclick="exportTengoSummary()">📋 Copiar resumen</button>
+      </div>
       <p class="db-sub">Stickers que tienes disponibles para dar. Elegí el equipo y tocá los números que tenés — tocá de nuevo para quitarlos.</p>
       <div class="team-picker">
         <div class="team-picker-row">
