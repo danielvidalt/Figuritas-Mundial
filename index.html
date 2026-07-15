@@ -2391,12 +2391,18 @@ function renderTrades() {
         <div class="manual-add-row">
           <select id="manualRecibo-${cid}">
             <option value="">Elegí lo que te da${manualReciboOpts.length ? ` (${manualReciboOpts.length})` : ''}...</option>
-            ${manualReciboOpts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}" ${manualReciboOptFlag(name, c.key) ? 'style="color:var(--red)"' : ''}>${c.key} — ${shortLabel(c.label)}</option>`).join('')}
+            ${manualReciboOpts.map(c => {
+              const flagged = manualReciboOptFlag(name, c.key);
+              return `<option value="${c.key.replace(/"/g, '&quot;')}" ${flagged ? 'style="color:var(--red)"' : ''}>${flagged ? '🔴 ' : ''}${c.key} — ${shortLabel(c.label)}</option>`;
+            }).join('')}
           </select>
           <span class="manual-arrow">⇄</span>
           <select id="manualDoy-${cid}">
             <option value="">Elegí lo que le das${manualDoyOpts.length ? ` (${manualDoyOpts.length})` : ''}...</option>
-            ${manualDoyOpts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}" ${manualDoyOptFlag(name, c.key) ? 'style="color:var(--red)"' : ''}>${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`).join('')}
+            ${manualDoyOpts.map(c => {
+              const flagged = manualDoyOptFlag(name, c.key);
+              return `<option value="${c.key.replace(/"/g, '&quot;')}" ${flagged ? 'style="color:var(--red)"' : ''}>${flagged ? '🔴 ' : ''}${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`;
+            }).join('')}
           </select>
           <button type="button" onclick="confirmAddManualPair('${escName}')">+ Agregar</button>
         </div>`;
