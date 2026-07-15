@@ -334,6 +334,7 @@
   .db-filter-qty { width: 110px; padding: 7px 9px; border: 1px solid var(--paper-line); border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 13px; }
   .db-subtotal { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
   .db-subtotal b { color: var(--pitch-dark); }
+  .db-live-note { display: block; font-size: 11px; color: var(--green-check); font-weight: 600; margin-top: 1px; }
 
   .db-add-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 8px; padding: 10px; margin-bottom: 12px; }
   .db-add-form input, .db-add-form select {
@@ -1212,6 +1213,55 @@ function usedCountFor(stickerKey, excludeId) {
   return count;
 }
 
+// Cuántas veces ya se RECIBIÓ un sticker (por su key de display) en tratos
+// marcados como hechos, en cualquier persona — el espejo de usedCountFor
+// (que cuenta lo ya ENTREGADO). Usado para reflejar en tiempo real, en Base
+// de Datos, qué ya se movió por intercambios completados.
+function receivedCountFor(stickerKey) {
+  let count = 0;
+  for (const name of Object.keys(state.people)) {
+    const { special, pairs } = getMatches(name);
+    for (const s of special) {
+      if (checked.has(s.id) && stickerDisplay(s.recibo_code, s.recibo_num) === stickerKey) count++;
+    }
+    for (const pr of pairs) {
+      if (checked.has(pr.id)) {
+        if (effectiveRecibo(pr) === stickerKey) count++;
+        count += getExtras(pr.id, 'recibo').filter(k => k === stickerKey).length;
+      }
+    }
+  }
+  return count;
+}
+
+// Igual que usedCountFor/receivedCountFor pero acotado a UNA persona — para
+// mostrar en su ficha de "Personas" qué de lo que tiene/necesita ya se movió
+// en tratos completados con ella específicamente.
+function personGivenCount(personName, stickerKey) {
+  const { special, pairs } = getMatches(personName);
+  let count = 0;
+  for (const s of special) if (checked.has(s.id) && stickerDisplay(s.doy_code, s.doy_num) === stickerKey) count++;
+  for (const pr of pairs) {
+    if (checked.has(pr.id)) {
+      if (effectiveDoy(pr) === stickerKey) count++;
+      count += getExtras(pr.id, 'doy').filter(k => k === stickerKey).length;
+    }
+  }
+  return count;
+}
+function personReceivedCount(personName, stickerKey) {
+  const { special, pairs } = getMatches(personName);
+  let count = 0;
+  for (const s of special) if (checked.has(s.id) && stickerDisplay(s.recibo_code, s.recibo_num) === stickerKey) count++;
+  for (const pr of pairs) {
+    if (checked.has(pr.id)) {
+      if (effectiveRecibo(pr) === stickerKey) count++;
+      count += getExtras(pr.id, 'recibo').filter(k => k === stickerKey).length;
+    }
+  }
+  return count;
+}
+
 function stockRemainingText(stickerKey, usedExcl) {
   const parts = stickerKey.split(' ');
   const num = parseInt(parts[parts.length - 1], 10);
@@ -1717,13 +1767,19 @@ function tengoFilteredRows() {
 function buildTengoListHtml() {
   const { filtered } = tengoFilteredRows();
   if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
-  return filtered.map(r => `<div class="db-row">
+  return filtered.map(r => {
+    const given = usedCountFor(stickerDisplay(r.code, r.num), '');
+    const givenNote = given > 0
+      ? `<span class="db-live-note">✅ ${given} de ${r.qty} ya entregado${given > 1 ? 's' : ''} (trato completado)</span>`
+      : '';
+    return `<div class="db-row">
       <span class="code">${stickerDisplay(r.code, r.num)}</span>
-      <span class="label">${categoryLabelOf(r.code, r.num)}</span>
+      <span class="label">${categoryLabelOf(r.code, r.num)}${givenNote}</span>
       <input type="number" class="qty-input" min="1" value="${r.qty}" onchange="updateTengoQty('${r.code}',${r.num},this.value)" />
       <button class="edit-value" title="Editar si es un sticker de valor especial" onclick="editPremium('${r.code}',${r.num})">✎</button>
       <button class="del" onclick="removeTengo('${r.code}',${r.num})">✕</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 function buildTengoSubtotalHtml() {
   const { all, filtered } = tengoFilteredRows();
@@ -1751,12 +1807,16 @@ function necesitoFilteredRows() {
 function buildNecesitoListHtml() {
   const { filtered } = necesitoFilteredRows();
   if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
-  return filtered.map(r => `<div class="db-row">
+  return filtered.map(r => {
+    const received = receivedCountFor(stickerDisplay(r.code, r.num));
+    const receivedNote = received > 0 ? `<span class="db-live-note">✅ Ya lo recibiste (trato completado)</span>` : '';
+    return `<div class="db-row">
       <span class="code">${stickerDisplay(r.code, r.num)}</span>
-      <span class="label">${categoryLabelOf(r.code, r.num)}</span>
+      <span class="label">${categoryLabelOf(r.code, r.num)}${receivedNote}</span>
       <button class="edit-value" title="Editar si es un sticker de valor especial" onclick="editPremium('${r.code}',${r.num})">✎</button>
       <button class="del" onclick="removeNecesito('${r.code}',${r.num})">✕</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 function buildNecesitoSubtotalHtml() {
   const { all, filtered } = necesitoFilteredRows();
@@ -2079,7 +2139,11 @@ function renderDbPersonas() {
               ${numberGridHtml(pickerPersonHave[name], new Set(Object.keys(p.have[pickerPersonHave[name]] || {}).map(Number)), n => `togglePersonHaveNum('${escName}','${pickerPersonHave[name]}',${n})`)}
               ${collapseButtonHtml(pickerPersonHave[name], `collapsePersonHavePicker('${escName}')`)}
             </div>
-            <div class="db-list">${haveRows.length ? haveRows.map(r => `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)} ${r.qty > 1 ? `x${r.qty}` : ''}</span><button class="del" onclick="removePersonHave('${escName}','${r.code}',${r.num})">✕</button></div>`).join('') : '<div class="db-empty">Sin datos</div>'}</div>
+            <div class="db-list">${haveRows.length ? haveRows.map(r => {
+              const received = personReceivedCount(name, stickerDisplay(r.code, r.num));
+              const note = received > 0 ? ` <span class="db-live-note">✅ Ya te lo dio</span>` : '';
+              return `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)} ${r.qty > 1 ? `x${r.qty}` : ''}${note}</span><button class="del" onclick="removePersonHave('${escName}','${r.code}',${r.num})">✕</button></div>`;
+            }).join('') : '<div class="db-empty">Sin datos</div>'}</div>
           </div>
           <div>
             <h3>Necesita (${needCount})</h3>
@@ -2090,7 +2154,11 @@ function renderDbPersonas() {
               ${numberGridHtml(pickerPersonNeed[name], new Set(p.need[pickerPersonNeed[name]] || []), n => `togglePersonNeedNum('${escName}','${pickerPersonNeed[name]}',${n})`)}
               ${collapseButtonHtml(pickerPersonNeed[name], `collapsePersonNeedPicker('${escName}')`)}
             </div>
-            <div class="db-list">${needRows.length ? needRows.map(r => `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)}</span><button class="del" onclick="removePersonNeed('${escName}','${r.code}',${r.num})">✕</button></div>`).join('') : '<div class="db-empty">Sin datos</div>'}</div>
+            <div class="db-list">${needRows.length ? needRows.map(r => {
+              const given = personGivenCount(name, stickerDisplay(r.code, r.num));
+              const note = given > 0 ? ` <span class="db-live-note">✅ Ya se lo diste</span>` : '';
+              return `<div class="db-row"><span class="code">${stickerDisplay(r.code, r.num)}</span><span class="label">${categoryLabelOf(r.code, r.num)}${note}</span><button class="del" onclick="removePersonNeed('${escName}','${r.code}',${r.num})">✕</button></div>`;
+            }).join('') : '<div class="db-empty">Sin datos</div>'}</div>
           </div>
         </div>
       </div>
