@@ -258,11 +258,6 @@
   .row-drag-handle:active { cursor: grabbing; }
   .rows-list .trade-item.sortable-ghost { opacity: 0.35; }
   .rows-list .trade-item.sortable-drag, .rows-list .trade-item.sortable-fallback { box-shadow: 0 6px 18px rgba(0,0,0,0.2); background: #fffdf7; }
-  .trade-row.extra-row { border-top: none; padding-top: 4px; padding-bottom: 4px; }
-  .remove-extra-btn { font-size: 10px; color: var(--red); background: none; border: none; cursor: pointer; padding: 0; margin-top: 2px; }
-  .remove-extra-btn:hover { text-decoration: underline; }
-  .add-row { padding-top: 2px; }
-  .add-row .add-extra-row { margin-top: 0; }
   .section-header {
     padding: 8px 16px 4px; border-top: 1px solid var(--paper-line);
     font-family: 'Barlow Condensed', sans-serif; font-size: 12.5px; font-weight: 700;
@@ -325,8 +320,6 @@
   .sticker-code { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 16px; }
   .sticker-label { font-size: 11.5px; color: var(--muted); margin-top: 1px; line-height: 1.25; }
   .value-note { color: var(--gold); font-style: italic; }
-  .sticker-code.not-needed { color: var(--red); }
-  .not-needed-note { display: block; color: var(--red); font-weight: 600; }
   .live-stock-note { font-size: 10.5px; font-weight: 600; color: var(--muted); }
   .live-stock-note.danger { color: var(--red); }
   .live-stock-note.conflict { color: var(--orange); font-weight: 700; }
@@ -383,11 +376,6 @@
   .swap-select { margin-top: 4px; font-family: 'Inter', sans-serif; font-size: 11px; color: var(--pitch); background: #fff; border: 1px solid var(--paper-line); border-radius: 6px; padding: 3px 6px; max-width: 100%; cursor: pointer; }
   .swap-select:disabled { opacity: 0.4; cursor: not-allowed; }
   .swap-select.overridden { border-color: var(--gold); background: var(--gold-soft); font-weight: 600; }
-
-  .add-extra-row { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; align-items: center; }
-  .add-extra-row select { font-family: 'Inter', sans-serif; font-size: 10.5px; border: 1px dashed var(--paper-line); border-radius: 6px; padding: 2px 4px; background: #fff; max-width: 130px; }
-  .add-extra-row button { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700; border: 1px solid var(--pitch); color: var(--pitch); background: transparent; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
-  .add-extra-row button:hover { background: var(--pitch); color: var(--paper); }
 
   footer { max-width: 920px; margin: 10px auto 0; padding: 0 16px; color: var(--muted); font-size: 12px; font-family: 'Barlow Condensed', sans-serif; }
 
@@ -930,7 +918,6 @@ function removeTradeRow(pairId) {
   if (!removedAutoPairs[personName].includes(sig)) removedAutoPairs[personName].push(sig);
   delete swaps[pairId];
   delete doySwaps[pairId];
-  delete extras[pairId];
   delete valueOverrides[pairId];
   checked.delete(pairId);
   saveTrackingState();
@@ -1044,8 +1031,37 @@ async function loadAll() {
     if (r && r.value) removedAutoPairs = JSON.parse(r.value);
   } catch (e) {}
 
+  if (migrateExtrasToManualPairs()) await saveTrackingState();
+
   loaded = true;
   renderAll();
+}
+// Migración única: el viejo "+ sumar" guardaba extras colgados de un par
+// existente (extras[pairId] = {recibo:[...], doy:[...]}). Ahora todo se
+// agrega como fila independiente en manualPairs (con un lado en null para
+// lo de un solo lado) desde "+ Agregar otro intercambio" — convierte lo que
+// haya quedado guardado y vacía extras para no volver a migrarlo.
+function migrateExtrasToManualPairs() {
+  const pairIds = Object.keys(extras);
+  if (!pairIds.length) return false;
+  for (const pairId of pairIds) {
+    const personName = pairPersonName(pairId);
+    const entry = extras[pairId] || {};
+    const pushOneSided = (key, side) => {
+      const { code, num } = codeNumFromKey(key);
+      if (!manualPairs[personName]) manualPairs[personName] = [];
+      const uid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}${manualPairs[personName].length}`;
+      manualPairs[personName].push({
+        uid,
+        recibo_code: side === 'recibo' ? code : null, recibo_num: side === 'recibo' ? num : null,
+        doy_code: side === 'doy' ? code : null, doy_num: side === 'doy' ? num : null,
+      });
+    };
+    for (const key of (entry.recibo || [])) pushOneSided(key, 'recibo');
+    for (const key of (entry.doy || [])) pushOneSided(key, 'doy');
+  }
+  extras = {};
+  return true;
 }
 
 async function saveDbState() {
@@ -1381,24 +1397,51 @@ function manualPairRecibCandidates(personName) {
 }
 function manualPairDoyCandidates(personName) {
   return danielStockList()
-    .filter(c => (c.qty - usedCountFor(c.key, '')) > 0)
+    .filter(c => (c.qty - doyLiveUsageCount(c.key)) > 0)
     .sort((a, b) => a.key.localeCompare(b.key));
 }
-// Para las listas del "+ Agregar otro intercambio": marca en rojo (vía CSS
-// inline en el <option>) lo que no sirve (no está en necesito/need) o lo que
-// ya figura en el trato de esa persona — para verlo de un vistazo antes de
-// elegir.
+// Para las listas del "+ Agregar otro intercambio" (el único lugar donde se
+// arma/edita cualquier trato): distingue entre lo que YA está en la lista de
+// esa persona ('duplicate', 🔴 — para no repetirlo sin querer) y lo que no
+// le hace falta a quien lo recibe pero sigue disponible como relleno
+// ('filler', 🟣) — null si no hay nada que avisar.
 function manualReciboOptFlag(personName, key) {
+  if (usedReciboCountForPerson(personName, key, '') > 0) return 'duplicate';
   const { code, num } = codeNumFromKey(key);
-  const notUseful = !necesitoHas(code, num);
-  const alreadyInList = usedReciboCountForPerson(personName, key, '') > 0;
-  return notUseful || alreadyInList;
+  if (!necesitoHas(code, num)) return 'filler';
+  return null;
 }
 function manualDoyOptFlag(personName, key) {
+  if ((personDoyKeyCounts(personName)[key] || 0) > 0) return 'duplicate';
   const { code, num } = codeNumFromKey(key);
-  const notUseful = !personNeedsThis(personName, code, num);
-  const alreadyInList = (personDoyKeyCounts(personName)[key] || 0) > 0;
-  return notUseful || alreadyInList;
+  if (!personNeedsThis(personName, code, num)) return 'filler';
+  return null;
+}
+// Arma las <option>/<optgroup> del "+ Agregar otro intercambio": lo útil
+// primero, y si hay relleno (no le sirve a quien lo recibe) va aparte en su
+// propio grupo marcado con 🟣 — y 🔴 si además ya figura en la lista. Usa
+// un prefijo de texto (no sólo color CSS) porque algunos navegadores (ej.
+// macOS) ignoran el color en <option>.
+function manualCandidateOptionsHtml(personName, opts, side) {
+  const flagFn = side === 'recibo' ? manualReciboOptFlag : manualDoyOptFlag;
+  const useful = [], filler = [];
+  for (const c of opts) {
+    const flag = flagFn(personName, c.key);
+    (flag === 'filler' ? filler : useful).push({ c, flag });
+  }
+  const optHtml = ({ c, flag }) => {
+    const prefix = flag === 'duplicate' ? '🔴 ' : flag === 'filler' ? '🟣 ' : '';
+    const color = flag === 'duplicate' ? 'var(--red)' : flag === 'filler' ? 'var(--violet)' : '';
+    const style = color ? ` style="color:${color}"` : '';
+    const qtyText = side === 'doy' ? ` (x${c.qty})` : '';
+    return `<option value="${c.key.replace(/"/g, '&quot;')}"${style}>${prefix}${c.key}${qtyText} — ${shortLabel(c.label)}</option>`;
+  };
+  let html = useful.map(optHtml).join('');
+  if (filler.length) {
+    const label = side === 'doy' ? '🟣 No le sirve — relleno disponible' : '🟣 No lo necesito — relleno disponible';
+    html += `<optgroup label="${label}">${filler.map(optHtml).join('')}</optgroup>`;
+  }
+  return html;
 }
 function buildManualPairs(personName) {
   const list = manualPairs[personName] || [];
@@ -1408,18 +1451,25 @@ function buildManualPairs(personName) {
     isManual: true,
     recibo_code: m.recibo_code, recibo_num: m.recibo_num,
     doy_code: m.doy_code, doy_num: m.doy_num,
-    recibo_base_bucket: baseBucket(m.recibo_code, m.recibo_num),
-    doy_base_bucket: baseBucket(m.doy_code, m.doy_num),
+    recibo_base_bucket: m.recibo_code != null ? baseBucket(m.recibo_code, m.recibo_num) : null,
+    doy_base_bucket: m.doy_code != null ? baseBucket(m.doy_code, m.doy_num) : null,
   }));
 }
+// reciboKey/doyKey pueden venir vacíos ('') para armar una fila de un solo
+// lado (por ejemplo, un extra de relleno que sólo doy sin recibir nada a
+// cambio) — hace falta al menos uno de los dos.
 function addManualPair(personName, reciboKey, doyKey) {
-  if (!reciboKey || !doyKey) { alert('Elegí un sticker de cada lado'); return; }
-  if (!confirmDoyDuplicateIfNeeded(personName, doyKey)) return;
-  const r = codeNumFromKey(reciboKey);
-  const d = codeNumFromKey(doyKey);
+  if (!reciboKey && !doyKey) { alert('Elegí al menos un sticker de algún lado'); return; }
+  if (doyKey && !confirmDoyDuplicateIfNeeded(personName, doyKey)) return;
+  const r = reciboKey ? codeNumFromKey(reciboKey) : null;
+  const d = doyKey ? codeNumFromKey(doyKey) : null;
   if (!manualPairs[personName]) manualPairs[personName] = [];
   const uid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  manualPairs[personName].push({ uid, recibo_code: r.code, recibo_num: r.num, doy_code: d.code, doy_num: d.num });
+  manualPairs[personName].push({
+    uid,
+    recibo_code: r ? r.code : null, recibo_num: r ? r.num : null,
+    doy_code: d ? d.code : null, doy_num: d ? d.num : null,
+  });
   saveTrackingState();
   renderAll();
 }
@@ -1437,23 +1487,32 @@ function removeManualPair(personName, uid) {
   renderAll();
 }
 
+// Todo lo agregado a mano ahora puede tener un lado vacío (null) — sirve
+// para un extra de relleno de un solo lado. Sin selector de swap para ese
+// lado (para cambiarlo hay que borrar la fila y agregar de nuevo desde la
+// lista de abajo), así que estas funciones no necesitan revisar overrides
+// cuando el código base es null.
 function effectiveRecibo(pair) {
+  if (pair.recibo_code == null) return null;
   const ov = swaps[pair.id];
   if (ov) return ov;
   return stickerDisplay(pair.recibo_code, pair.recibo_num);
 }
 function effectiveReciboLabel(pair) {
+  if (pair.recibo_code == null) return null;
   const ov = swaps[pair.id];
   if (!ov) return categoryLabelOf(pair.recibo_code, pair.recibo_num);
   const cand = personCandidates(pairPersonName(pair.id)).find(c => c.key === ov);
   return cand ? cand.label : categoryLabelOf(pair.recibo_code, pair.recibo_num);
 }
 function effectiveDoy(pair) {
+  if (pair.doy_code == null) return null;
   const ov = doySwaps[pair.id];
   if (ov) return ov;
   return stickerDisplay(pair.doy_code, pair.doy_num);
 }
 function effectiveDoyLabel(pair) {
+  if (pair.doy_code == null) return null;
   const ov = doySwaps[pair.id];
   if (!ov) return categoryLabelOf(pair.doy_code, pair.doy_num);
   const cand = danielStockList().find(c => c.key === ov);
@@ -1467,7 +1526,6 @@ function usedReciboCountForPerson(personName, key, excludePairId) {
     if (pr.id !== excludePairId) {
       if (effectiveRecibo(pr) === key) count++;
     }
-    count += getExtras(pr.id, 'recibo').filter(k => k === key).length;
   }
   return count;
 }
@@ -1483,9 +1541,6 @@ function usedCountFor(stickerKey, excludeId) {
     for (const pr of pairs) {
       if (pr.id !== excludeId) {
         if (effectiveDoy(pr) === stickerKey && checked.has(pr.id)) count++;
-      }
-      if (checked.has(pr.id)) {
-        count += getExtras(pr.id, 'doy').filter(k => k === stickerKey).length;
       }
     }
   }
@@ -1513,7 +1568,6 @@ function receivedCountFor(stickerKey) {
     for (const pr of pairs) {
       if (checked.has(pr.id)) {
         if (effectiveRecibo(pr) === stickerKey) count++;
-        count += getExtras(pr.id, 'recibo').filter(k => k === stickerKey).length;
       }
     }
   }
@@ -1530,7 +1584,6 @@ function personGivenCount(personName, stickerKey) {
   for (const pr of pairs) {
     if (checked.has(pr.id)) {
       if (effectiveDoy(pr) === stickerKey) count++;
-      count += getExtras(pr.id, 'doy').filter(k => k === stickerKey).length;
     }
   }
   return count;
@@ -1542,7 +1595,6 @@ function personReceivedCount(personName, stickerKey) {
   for (const pr of pairs) {
     if (checked.has(pr.id)) {
       if (effectiveRecibo(pr) === stickerKey) count++;
-      count += getExtras(pr.id, 'recibo').filter(k => k === stickerKey).length;
     }
   }
   return count;
@@ -1569,7 +1621,6 @@ function doyLiveUsageCount(key) {
     }
     for (const pr of pairs) {
       if (effectiveDoy(pr) === key) count++;
-      count += getExtras(pr.id, 'doy').filter(k => k === key).length;
     }
   }
   return count;
@@ -1585,15 +1636,13 @@ function computeStockConflicts() {
   for (const name of Object.keys(state.people)) {
     const { special, pairs } = getMatches(name);
     const bump = key => {
+      if (!key) return;
       if (!usage[key]) usage[key] = { count: 0, people: new Set() };
       usage[key].count++;
       usage[key].people.add(name);
     };
     for (const s of special) bump(stickerDisplay(s.doy_code, s.doy_num));
-    for (const pr of pairs) {
-      bump(effectiveDoy(pr));
-      for (const k of getExtras(pr.id, 'doy')) bump(k);
-    }
+    for (const pr of pairs) bump(effectiveDoy(pr));
   }
   const conflicts = [];
   for (const key in usage) {
@@ -1640,16 +1689,10 @@ function doyLiveStockNoteHtml(key, currentPersonName) {
   return ` <span class="live-stock-note">(quedan ${remaining})</span>`;
 }
 
-// ============================================================================
-// EXTRAS (sumar stickers para compensar valor)
-// ============================================================================
-function getExtras(pairId, side) {
-  return (extras[pairId] && extras[pairId][side]) || [];
-}
 // Sección de un ítem de intercambio teniendo en cuenta el sticker ACTUAL en
-// cada lado (después de swaps) y sus extras — no el bucket original con el
-// que se generó el par. Así, si cambiás lo que das/recibís a otra categoría,
-// el ítem se reclasifica solo a la sección correspondiente.
+// cada lado (después de swaps) — no el bucket original con el que se generó
+// el par. Así, si cambiás lo que das/recibís a otra categoría, el ítem se
+// reclasifica solo a la sección correspondiente.
 function tradeItemSectionKey(item, isSpecial) {
   if (isSpecial) {
     return mostValuableSectionKey([
@@ -1657,22 +1700,19 @@ function tradeItemSectionKey(item, isSpecial) {
       baseBucket(item.doy_code, item.doy_num),
     ]);
   }
-  const buckets = [bucketOfKey(effectiveRecibo(item)), bucketOfKey(effectiveDoy(item))];
-  for (const k of getExtras(item.id, 'recibo')) buckets.push(bucketOfKey(k));
-  for (const k of getExtras(item.id, 'doy')) buckets.push(bucketOfKey(k));
+  const rec = effectiveRecibo(item);
+  const doy = effectiveDoy(item);
+  const buckets = [rec ? bucketOfKey(rec) : null, doy ? bucketOfKey(doy) : null];
   return mostValuableSectionKey(buckets);
 }
 // Cuenta cuántas veces se está entregando cada sticker (lado "doy") dentro
-// del trato con una persona — pares, extras y trato especial incluidos.
+// del trato con una persona — pares y trato especial incluidos.
 function personDoyKeyCounts(personName) {
   const { special, pairs } = getMatches(personName);
   const counts = {};
-  const bump = k => { counts[k] = (counts[k] || 0) + 1; };
+  const bump = k => { if (k) counts[k] = (counts[k] || 0) + 1; };
   for (const s of special) bump(stickerDisplay(s.doy_code, s.doy_num));
-  for (const pr of pairs) {
-    bump(effectiveDoy(pr));
-    for (const k of getExtras(pr.id, 'doy')) bump(k);
-  }
+  for (const pr of pairs) bump(effectiveDoy(pr));
   return counts;
 }
 // Si asignar `key` como "doy" repetiría un sticker ya comprometido en el
@@ -1685,131 +1725,10 @@ function confirmDoyDuplicateIfNeeded(personName, key) {
   const stock = tengoQty(code, num);
   return confirm(`⚠ Estás por entregar ${key} ${n} veces en este intercambio.\nTenés ${stock} en stock.\n\n¿Confirmás igual?`);
 }
-function addExtra(pairId, side, key) {
-  if (!key) return;
-  if (side === 'doy' && !confirmDoyDuplicateIfNeeded(pairPersonName(pairId), key)) return;
-  if (!extras[pairId]) extras[pairId] = { recibo: [], doy: [] };
-  extras[pairId][side].push(key);
-  saveTrackingState();
-  renderAll();
-}
-function removeExtra(pairId, side, index) {
-  extras[pairId][side].splice(index, 1);
-  saveTrackingState();
-  renderAll();
-}
-// Candidatos válidos para reemplazar un extra ya sumado — misma lógica de
-// disponibilidad real (tengo/necesito + stock) que el resto de la app, pero
-// siempre incluye la clave actual para que no desaparezca de su propio menú.
-function extraCandidates(pairId, side, currentKey) {
-  const personName = pairPersonName(pairId);
-  if (side === 'recibo') {
-    return personCandidates(personName)
-      .filter(c => c.key === currentKey || usedReciboCountForPerson(personName, c.key, '') < c.qty)
-      .sort((a, b) => a.key.localeCompare(b.key));
-  }
-  return danielStockList()
-    .filter(c => personNeedList(personName).includes(c.key))
-    .filter(c => c.key === currentKey || (c.qty - usedCountFor(c.key, '')) > 0)
-    .sort((a, b) => a.key.localeCompare(b.key));
-}
-function swapExtra(pairId, side, index, newKey) {
-  if (!newKey) return;
-  if (side === 'doy' && newKey !== extras[pairId][side][index] && !confirmDoyDuplicateIfNeeded(pairPersonName(pairId), newKey)) {
-    renderAll();
-    return;
-  }
-  extras[pairId][side][index] = newKey;
-  saveTrackingState();
-  renderAll();
-}
 function findPairById(pairId) {
   const personName = pairPersonName(pairId);
   const { pairs } = getMatches(personName);
   return pairs.find(p => p.id === pairId) || null;
-}
-function findLabelForKey(pairId, side, key) {
-  const personName = pairPersonName(pairId);
-  if (side === 'recibo') {
-    const c = personCandidates(personName).find(c => c.key === key);
-    return c ? c.label : key;
-  } else {
-    const c = danielStockList().find(c => c.key === key);
-    return c ? c.label : key;
-  }
-}
-function computeAddCandidates(pairId, side, scope) {
-  const pair = findPairById(pairId);
-  if (!pair) return [];
-  const personName = pairPersonName(pairId);
-  const person = state.people[personName];
-  if (side === 'recibo') {
-    const bucket = pair.recibo_base_bucket;
-    return personCandidates(personName)
-      .filter(c => scope === 'all' || c.base_bucket === bucket)
-      .filter(c => usedReciboCountForPerson(personName, c.key, '') < c.qty)
-      .sort((a, b) => a.key.localeCompare(b.key));
-  } else {
-    const bucket = pair.doy_base_bucket;
-    return danielStockList()
-      .filter(c => scope === 'all' || c.base_bucket === bucket)
-      .filter(c => personNeedList(personName).includes(c.key))
-      .filter(c => (c.qty - usedCountFor(c.key, '')) > 0)
-      .sort((a, b) => a.key.localeCompare(b.key));
-  }
-}
-// Candidatos para sumar como extra que NO le sirven a quien los recibe (no
-// están en necesito/need) pero igual están disponibles — el "relleno" que
-// se usa mucho en la negociación real cuando un lado tiene una copia de más
-// para compensar y no tiene nada que a la otra parte le haga falta.
-function computeAddCandidatesNotUseful(pairId, side, scope) {
-  const pair = findPairById(pairId);
-  if (!pair) return [];
-  const personName = pairPersonName(pairId);
-  if (side === 'recibo') {
-    const bucket = pair.recibo_base_bucket;
-    return personAllHaveCandidates(personName)
-      .filter(c => scope === 'all' || c.base_bucket === bucket)
-      .filter(c => { const { code, num } = codeNumFromKey(c.key); return !necesitoHas(code, num); })
-      .filter(c => usedReciboCountForPerson(personName, c.key, '') < c.qty)
-      .sort((a, b) => a.key.localeCompare(b.key));
-  } else {
-    const bucket = pair.doy_base_bucket;
-    return danielStockList()
-      .filter(c => scope === 'all' || c.base_bucket === bucket)
-      .filter(c => !personNeedList(personName).includes(c.key))
-      .filter(c => (c.qty - doyLiveUsageCount(c.key)) > 0)
-      .sort((a, b) => a.key.localeCompare(b.key));
-  }
-}
-// Arma el HTML de opciones del "+ sumar": primero lo que sirve, y si hay
-// relleno disponible (no le sirve a quien lo recibe) lo agrega en un grupo
-// aparte, marcado con 🟣 — visible en todos los navegadores, a diferencia
-// de un color CSS en <option> que algunos (ej. macOS) ignoran.
-function addExtraPickOptionsHtml(pairId, side, scope) {
-  const useful = computeAddCandidates(pairId, side, scope);
-  const notUseful = computeAddCandidatesNotUseful(pairId, side, scope);
-  const optHtml = c => `<option value="${c.key}">${c.key}${side === 'doy' ? ` (x${c.qty})` : ''} — ${shortLabel(c.label)}</option>`;
-  const fillerOptHtml = c => `<option value="${c.key}" style="color:var(--violet)">🟣 ${c.key}${side === 'doy' ? ` (x${c.qty})` : ''} — ${shortLabel(c.label)}</option>`;
-  let html = useful.map(optHtml).join('');
-  if (notUseful.length) {
-    const label = side === 'doy' ? '🟣 No le sirve — relleno disponible' : '🟣 No lo necesito — relleno disponible';
-    html += `<optgroup label="${label}">${notUseful.map(fillerOptHtml).join('')}</optgroup>`;
-  }
-  return html || '<option value="">(sin opciones disponibles)</option>';
-}
-function refreshAddCandidates(scopeSelectEl) {
-  const pairId = scopeSelectEl.dataset.pair;
-  const side = scopeSelectEl.dataset.side;
-  const scope = scopeSelectEl.value;
-  const candidateSelect = scopeSelectEl.parentElement.querySelector('.add-extra-pick');
-  candidateSelect.innerHTML = addExtraPickOptionsHtml(pairId, side, scope);
-}
-function confirmAddExtra(btnEl) {
-  const pairId = btnEl.dataset.pair;
-  const side = btnEl.dataset.side;
-  const candidateSelect = btnEl.parentElement.querySelector('.add-extra-pick');
-  addExtra(pairId, side, candidateSelect.value);
 }
 function swapRecibo(selectEl) {
   const pairId = selectEl.dataset.pair;
@@ -1859,22 +1778,26 @@ function renderExplodedColumns(personName, orderedIds, byId) {
     const item = byId[id];
     const reciboKey = effectiveRecibo(item);
     const doyKey = effectiveDoy(item);
-    const reciboExtrasCount = getExtras(id, 'recibo').length;
-    const doyExtrasCount = getExtras(id, 'doy').length;
-    const reciboCN = codeNumFromKey(reciboKey);
-    const doyCN = codeNumFromKey(doyKey);
-    const reciboNotNeeded = !necesitoHas(reciboCN.code, reciboCN.num);
-    const doyNotNeeded = !personNeedsThis(personName, doyCN.code, doyCN.num);
-    reciboHtml += `<div class="explode-chip" data-key="${reciboKey.replace(/"/g, '&quot;')}">
-        <div class="sticker-code ${reciboNotNeeded ? 'not-needed' : ''}">${reciboKey}</div>
-        <div class="sticker-label">${shortLabel(effectiveReciboLabel(item))}</div>
-        ${reciboExtrasCount ? `<span class="explode-extra-badge">+${reciboExtrasCount}</span>` : ''}
-      </div>`;
-    doyHtml += `<div class="explode-chip" data-key="${doyKey.replace(/"/g, '&quot;')}">
-        <div class="sticker-code ${doyNotNeeded ? 'not-needed' : ''}">${doyKey}</div>
-        <div class="sticker-label">${shortLabel(effectiveDoyLabel(item))}</div>
-        ${doyExtrasCount ? `<span class="explode-extra-badge">+${doyExtrasCount}</span>` : ''}
-      </div>`;
+    if (reciboKey) {
+      const reciboCN = codeNumFromKey(reciboKey);
+      const reciboNotNeeded = !necesitoHas(reciboCN.code, reciboCN.num);
+      reciboHtml += `<div class="explode-chip" data-key="${reciboKey.replace(/"/g, '&quot;')}">
+          <div class="sticker-code ${reciboNotNeeded ? 'filler' : ''}">${reciboKey}</div>
+          <div class="sticker-label">${shortLabel(effectiveReciboLabel(item))}</div>
+        </div>`;
+    } else {
+      reciboHtml += `<div class="explode-chip empty-block" data-key=""></div>`;
+    }
+    if (doyKey) {
+      const doyCN = codeNumFromKey(doyKey);
+      const doyNotNeeded = !personNeedsThis(personName, doyCN.code, doyCN.num);
+      doyHtml += `<div class="explode-chip" data-key="${doyKey.replace(/"/g, '&quot;')}">
+          <div class="sticker-code ${doyNotNeeded ? 'filler' : ''}">${doyKey}</div>
+          <div class="sticker-label">${shortLabel(effectiveDoyLabel(item))}</div>
+        </div>`;
+    } else {
+      doyHtml += `<div class="explode-chip empty-block" data-key=""></div>`;
+    }
   }
   // El orden de slots (qué par ocupa cada POSICIÓN) va en el contenedor, no
   // en cada ficha — así al arrastrar sólo se mueve la clave (el sticker),
@@ -1899,7 +1822,11 @@ function commitExplodeOrder(personName, side) {
   slotOrder.forEach((slotId, i) => {
     const newKey = newKeys[i];
     const item = findPairById(slotId);
-    if (!item || newKey === undefined) return;
+    if (!item || !newKey) return;
+    // Un lado que nace vacío (extra de relleno de un solo lado) no admite
+    // swap — para cambiarlo hay que borrar la fila y agregar de nuevo.
+    const originalCode = side === 'recibo' ? item.recibo_code : item.doy_code;
+    if (originalCode == null) return;
     const defaultKey = side === 'recibo'
       ? stickerDisplay(item.recibo_code, item.recibo_num)
       : stickerDisplay(item.doy_code, item.doy_num);
@@ -2017,7 +1944,6 @@ function runMatchReset(personName) {
   delete removedAutoPairs[personName];
   for (const id of Object.keys(swaps)) if (pairPersonName(id) === personName) delete swaps[id];
   for (const id of Object.keys(doySwaps)) if (pairPersonName(id) === personName) delete doySwaps[id];
-  for (const id of Object.keys(extras)) if (pairPersonName(id) === personName) delete extras[id];
   for (const id of Object.keys(valueOverrides)) if (pairPersonName(id) === personName) delete valueOverrides[id];
   for (const id of Array.from(checked)) if (pairPersonName(id) === personName) checked.delete(id);
   _matchCache = {};
@@ -2044,15 +1970,15 @@ function keyWithPlayerName(key) {
   const player = premiumOf(code, num);
   return player ? `${key} (${shortLabel(player)})` : key;
 }
-// Cuenta los stickers FÍSICOS de cada lado (contando extras) — con tratos
-// 1xN el total de un lado puede no coincidir con el del otro.
+// Cuenta los stickers FÍSICOS de cada lado — con extras de un solo lado el
+// total de un lado puede no coincidir con el del otro.
 function countTradeStickers(personName) {
   const { special, pairs } = getMatches(personName);
   let reciboCount = 0, doyCount = 0;
   for (const s of special) { reciboCount++; doyCount++; }
   for (const pr of pairs) {
-    reciboCount += 1 + getExtras(pr.id, 'recibo').length;
-    doyCount += 1 + getExtras(pr.id, 'doy').length;
+    if (effectiveRecibo(pr)) reciboCount++;
+    if (effectiveDoy(pr)) doyCount++;
   }
   return { reciboCount, doyCount };
 }
@@ -2080,10 +2006,14 @@ function buildTradeSummaryText(personName) {
   let itemCount = 0;
   const pushItem = (recibo, doy, done) => {
     itemCount++;
-    lines.push(`${done ? '✅ ' : ''}Dani entrega ${keyWithPlayerName(doy)} y ${firstName} entrega ${keyWithPlayerName(recibo)}.`);
-  };
-  const pushExtra = (key, side) => {
-    lines.push(`   + ${side === 'doy' ? 'Dani también entrega' : `${firstName} también entrega`} ${keyWithPlayerName(key)}.`);
+    const mark = done ? '✅ ' : '';
+    if (recibo && doy) {
+      lines.push(`${mark}Dani entrega ${keyWithPlayerName(doy)} y ${firstName} entrega ${keyWithPlayerName(recibo)}.`);
+    } else if (doy) {
+      lines.push(`${mark}Dani entrega ${keyWithPlayerName(doy)} (relleno, sin recibir nada a cambio).`);
+    } else if (recibo) {
+      lines.push(`${mark}${firstName} entrega ${keyWithPlayerName(recibo)} (relleno, sin dar nada a cambio).`);
+    }
   };
 
   if (special.length) {
@@ -2109,8 +2039,6 @@ function buildTradeSummaryText(personName) {
     for (const id of orderedIds) {
       const item = byId[id];
       pushItem(effectiveRecibo(item), effectiveDoy(item), checked.has(item.id));
-      for (const k of getExtras(item.id, 'recibo')) pushExtra(k, 'recibo');
-      for (const k of getExtras(item.id, 'doy')) pushExtra(k, 'doy');
     }
     lines.push('');
   }
@@ -2147,43 +2075,47 @@ function toggleValueOverride(pairId, side) {
 // RENDER — PÁGINA DE INTERCAMBIOS
 // ============================================================================
 function renderTradeRow(item, isSpecial) {
-  const stickerKey = isSpecial ? stickerDisplay(item.doy_code, item.doy_num) : effectiveDoy(item);
   const isChecked = checked.has(item.id);
-  const usedByOthers = usedCountFor(stickerKey, item.id);
-  const { total, remaining } = stockRemainingText(stickerKey, usedByOthers);
-  const blocked = !isChecked && remaining <= 0;
+  const personNameForRow = pairPersonName(item.id);
+
+  const recibo = isSpecial ? stickerDisplay(item.recibo_code, item.recibo_num) : effectiveRecibo(item);
+  const doy = isSpecial ? stickerDisplay(item.doy_code, item.doy_num) : effectiveDoy(item);
+
+  // El bloqueo/nota de stock sólo aplica al lado "doy" (mi stock) — una
+  // fila de un solo lado del lado "recibo" no compromete nada mío.
+  let blocked = false, note = '';
+  if (doy) {
+    const usedByOthers = usedCountFor(doy, item.id);
+    const { total, remaining } = stockRemainingText(doy, usedByOthers);
+    blocked = !isChecked && remaining <= 0;
+    if (blocked) note = `<div class="stock-note blocked-text">⚠ Ya no disponible — este ${doy} se usó en otro intercambio</div>`;
+    else if (!isChecked && total > 1 && remaining < total) note = `<div class="stock-note low-text">Quedan ${remaining} de ${total} disponibles</div>`;
+    else if (!isChecked && total > 1) note = `<div class="stock-note">Tienes ${total} disponibles</div>`;
+  }
 
   let rowClass = 'trade-row';
   if (isSpecial) rowClass += ' special';
   if (isChecked) rowClass += ' done';
   else if (blocked) rowClass += ' blocked';
 
-  let note = '';
-  if (blocked) note = `<div class="stock-note blocked-text">⚠ Ya no disponible — este ${stickerKey} se usó en otro intercambio</div>`;
-  else if (!isChecked && total > 1 && remaining < total) note = `<div class="stock-note low-text">Quedan ${remaining} de ${total} disponibles</div>`;
-  else if (!isChecked && total > 1) note = `<div class="stock-note">Tienes ${total} disponibles</div>`;
-
-  const recibo = isSpecial ? stickerDisplay(item.recibo_code, item.recibo_num) : effectiveRecibo(item);
   const realReciboLabel = isSpecial ? categoryLabelOf(item.recibo_code, item.recibo_num) : effectiveReciboLabel(item);
-  const doy = isSpecial ? stickerDisplay(item.doy_code, item.doy_num) : stickerKey;
   const realDoyLabel = isSpecial ? categoryLabelOf(item.doy_code, item.doy_num) : effectiveDoyLabel(item);
 
-  // Marca en rojo cuando un sticker del trato no figura en "necesito" (vos) o
-  // "necesita" (la otra persona) — normal en tratos armados a mano, donde a
-  // veces se incluye algo que no hace falta para el álbum pero igual se
-  // quiere (para revender o intercambiar más adelante).
-  const personNameForRow = pairPersonName(item.id);
-  const reciboCN = codeNumFromKey(recibo);
-  const doyCN = codeNumFromKey(doy);
-  const reciboNotNeeded = !necesitoHas(reciboCN.code, reciboCN.num);
-  const doyNotNeeded = !personNeedsThis(personNameForRow, doyCN.code, doyCN.num);
-  const reciboNotNeededNote = reciboNotNeeded ? `<span class="not-needed-note">🔴 Vos no lo necesitás</span>` : '';
-  const doyNotNeededNote = doyNotNeeded ? `<span class="not-needed-note">🔴 No lo necesita</span>` : '';
+  // Violeta cuando un sticker del trato no figura en "necesito" (vos) o
+  // "necesita" (la otra persona) — normal en extras de relleno agregados a
+  // mano, donde a veces se incluye algo que no hace falta para el álbum
+  // pero igual se quiere (para revender, o para compensar el otro lado).
+  const reciboCN = recibo ? codeNumFromKey(recibo) : null;
+  const doyCN = doy ? codeNumFromKey(doy) : null;
+  const reciboNotNeeded = !!reciboCN && !necesitoHas(reciboCN.code, reciboCN.num);
+  const doyNotNeeded = !!doyCN && !personNeedsThis(personNameForRow, doyCN.code, doyCN.num);
+  const reciboNotNeededNote = reciboNotNeeded ? `<span class="filler-note">🟣 Extra de relleno — vos no lo necesitás</span>` : '';
+  const doyNotNeededNote = doyNotNeeded ? `<span class="filler-note">🟣 Extra de relleno — no lo necesita</span>` : '';
 
   const escId = item.id.replace(/'/g, "\\'");
   const ov = valueOverrides[item.id] || {};
-  const reciboIsPremium = isPremiumLabel(realReciboLabel);
-  const doyIsPremium = isPremiumLabel(realDoyLabel);
+  const reciboIsPremium = !!recibo && isPremiumLabel(realReciboLabel);
+  const doyIsPremium = !!doy && isPremiumLabel(realDoyLabel);
   const reciboAdjusted = reciboIsPremium && ov.recibo;
   const doyAdjusted = doyIsPremium && ov.doy;
   const reciboLabel = reciboAdjusted
@@ -2199,132 +2131,74 @@ function renderTradeRow(item, isSpecial) {
     ? `<button type="button" class="value-toggle ${doyAdjusted ? 'active' : ''}" ${isChecked ? 'disabled' : ''} title="${doyAdjusted ? 'Restaurar su valor real de jugador destacado' : 'Bajar su valor a Jugador normal solo para este trato'}" onclick="toggleValueOverride('${escId}','doy')">⚖️</button>`
     : '';
 
-  let reciboSwapHtml = '', doySwapHtml = '', reciboAddHtml = '', doyAddHtml = '';
-  let reciboExtras = [], doyExtras = [];
+  // Sin selector de swap para un lado que nace vacío (extra de relleno de un
+  // solo lado) — para cambiarlo hay que borrar la fila y agregar de nuevo
+  // desde "+ Agregar otro intercambio", que es ahora el único lugar donde
+  // se arma/edita cualquier trato.
+  let reciboSwapHtml = '', doySwapHtml = '';
   if (!isSpecial) {
-    const personName = pairPersonName(item.id);
+    const personName = personNameForRow;
 
-    const isReciboOverridden = !!swaps[item.id];
-    const reciboCandidates = personCandidates(personName)
-      .filter(c => c.key === recibo || usedReciboCountForPerson(personName, c.key, item.id) < c.qty)
-      .sort((a, b) => a.key.localeCompare(b.key));
-    if (reciboCandidates.length > 1) {
-      const same = reciboCandidates.filter(c => c.base_bucket === item.recibo_base_bucket);
-      const other = reciboCandidates.filter(c => c.base_bucket !== item.recibo_base_bucket);
-      const optHtml = c => `<option value="${c.key}" ${c.key === recibo ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
-      let opts = `<option value="">↺ Original: ${stickerDisplay(item.recibo_code, item.recibo_num)}</option>`;
-      if (same.length) opts += `<optgroup label="Misma categoría">${same.map(optHtml).join('')}</optgroup>`;
-      if (other.length) opts += `<optgroup label="Otras categorías">${other.map(optHtml).join('')}</optgroup>`;
-      reciboSwapHtml = `<select class="swap-select ${isReciboOverridden ? 'overridden' : ''}" data-pair="${item.id}" onchange="swapRecibo(this)" ${isChecked ? 'disabled' : ''}>${opts}</select>`;
+    if (recibo) {
+      const isReciboOverridden = !!swaps[item.id];
+      const reciboCandidates = personCandidates(personName)
+        .filter(c => c.key === recibo || usedReciboCountForPerson(personName, c.key, item.id) < c.qty)
+        .sort((a, b) => a.key.localeCompare(b.key));
+      if (reciboCandidates.length > 1) {
+        const same = reciboCandidates.filter(c => c.base_bucket === item.recibo_base_bucket);
+        const other = reciboCandidates.filter(c => c.base_bucket !== item.recibo_base_bucket);
+        const optHtml = c => `<option value="${c.key}" ${c.key === recibo ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`;
+        let opts = `<option value="">↺ Original: ${stickerDisplay(item.recibo_code, item.recibo_num)}</option>`;
+        if (same.length) opts += `<optgroup label="Misma categoría">${same.map(optHtml).join('')}</optgroup>`;
+        if (other.length) opts += `<optgroup label="Otras categorías">${other.map(optHtml).join('')}</optgroup>`;
+        reciboSwapHtml = `<select class="swap-select ${isReciboOverridden ? 'overridden' : ''}" data-pair="${item.id}" onchange="swapRecibo(this)" ${isChecked ? 'disabled' : ''}>${opts}</select>`;
+      }
     }
 
-    const isDoyOverridden = !!doySwaps[item.id];
-    const doyCandidates = danielStockList()
-      .filter(c => personNeedList(personName).includes(c.key))
-      .filter(c => c.key === doy || (c.qty - usedCountFor(c.key, item.id)) > 0)
-      .sort((a, b) => a.key.localeCompare(b.key));
-    if (doyCandidates.length > 1) {
-      const same = doyCandidates.filter(c => c.base_bucket === item.doy_base_bucket);
-      const other = doyCandidates.filter(c => c.base_bucket !== item.doy_base_bucket);
-      const optHtml = c => `<option value="${c.key}" ${c.key === doy ? 'selected' : ''}>${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`;
-      let opts = `<option value="">↺ Original: ${stickerDisplay(item.doy_code, item.doy_num)}</option>`;
-      if (same.length) opts += `<optgroup label="Misma categoría">${same.map(optHtml).join('')}</optgroup>`;
-      if (other.length) opts += `<optgroup label="Otras categorías">${other.map(optHtml).join('')}</optgroup>`;
-      doySwapHtml = `<select class="swap-select ${isDoyOverridden ? 'overridden' : ''}" data-pair="${item.id}" onchange="swapDoy(this)" ${isChecked ? 'disabled' : ''}>${opts}</select>`;
-    }
-
-    reciboExtras = getExtras(item.id, 'recibo');
-    doyExtras = getExtras(item.id, 'doy');
-
-    if (!isChecked) {
-      reciboAddHtml = `<div class="add-extra-row">
-        <select class="add-extra-scope" data-pair="${item.id}" data-side="recibo" onchange="refreshAddCandidates(this)">
-          <option value="same">Misma categoría</option><option value="all">Todas las categorías</option>
-        </select>
-        <select class="add-extra-pick">${addExtraPickOptionsHtml(item.id, 'recibo', 'same')}</select>
-        <button data-pair="${item.id}" data-side="recibo" onclick="confirmAddExtra(this)">+ sumar</button>
-      </div>`;
-      doyAddHtml = `<div class="add-extra-row">
-        <select class="add-extra-scope" data-pair="${item.id}" data-side="doy" onchange="refreshAddCandidates(this)">
-          <option value="same">Misma categoría</option><option value="all">Todas las categorías</option>
-        </select>
-        <select class="add-extra-pick">${addExtraPickOptionsHtml(item.id, 'doy', 'same')}</select>
-        <button data-pair="${item.id}" data-side="doy" onclick="confirmAddExtra(this)">+ sumar</button>
-      </div>`;
+    if (doy) {
+      const isDoyOverridden = !!doySwaps[item.id];
+      const doyCandidates = danielStockList()
+        .filter(c => personNeedList(personName).includes(c.key))
+        .filter(c => c.key === doy || (c.qty - usedCountFor(c.key, item.id)) > 0)
+        .sort((a, b) => a.key.localeCompare(b.key));
+      if (doyCandidates.length > 1) {
+        const same = doyCandidates.filter(c => c.base_bucket === item.doy_base_bucket);
+        const other = doyCandidates.filter(c => c.base_bucket !== item.doy_base_bucket);
+        const optHtml = c => `<option value="${c.key}" ${c.key === doy ? 'selected' : ''}>${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`;
+        let opts = `<option value="">↺ Original: ${stickerDisplay(item.doy_code, item.doy_num)}</option>`;
+        if (same.length) opts += `<optgroup label="Misma categoría">${same.map(optHtml).join('')}</optgroup>`;
+        if (other.length) opts += `<optgroup label="Otras categorías">${other.map(optHtml).join('')}</optgroup>`;
+        doySwapHtml = `<select class="swap-select ${isDoyOverridden ? 'overridden' : ''}" data-pair="${item.id}" onchange="swapDoy(this)" ${isChecked ? 'disabled' : ''}>${opts}</select>`;
+      }
     }
   }
 
   const dragHandleHtml = isSpecial ? '<div></div>' : '<div class="row-drag-handle" title="Arrastrar para reordenar dentro de esta categoría">⠿</div>';
 
-  // Fila base: el par 1x1 original. Si hay extras (para tratos 1xN o Nx1), se
-  // agregan como filas propias abajo, con la columna del otro lado vacía —
-  // así se ve como una sola tabla en vez de un tag ambiguo pegado al lado.
+  const reciboBlockHtml = recibo
+    ? `<div class="sticker-block">
+        <div class="sticker-code ${reciboNotNeeded ? 'filler' : ''}">${recibo}</div>
+        <div class="sticker-label">${reciboLabel} ${reciboValueToggle}${reciboNotNeededNote}</div>
+        ${reciboSwapHtml}
+      </div>`
+    : '<div class="sticker-block empty-block"></div>';
+  const doyBlockHtml = doy
+    ? `<div class="sticker-block">
+        <div class="sticker-code ${doyNotNeeded ? 'filler' : ''} ${!isChecked && doyConflictInfo(doy) ? 'conflict' : ''}">${doy}${!isChecked ? doyLiveStockNoteHtml(doy, personNameForRow) : ''}</div>
+        <div class="sticker-label">${doyLabel} ${doyValueToggle}${doyNotNeededNote}</div>
+        ${doySwapHtml}
+      </div>`
+    : '<div class="sticker-block empty-block"></div>';
+
   let html = `<div class="trade-item" data-row-id="${item.id.replace(/"/g, '&quot;')}">`;
   html += `<div class="${rowClass}">
       ${dragHandleHtml}
       <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${item.id.replace(/'/g, "\\'")}')" />
-      <div class="sticker-block">
-        <div class="sticker-code ${reciboNotNeeded ? 'not-needed' : ''}">${recibo}</div>
-        <div class="sticker-label">${reciboLabel} ${reciboValueToggle}${reciboNotNeededNote}</div>
-        ${reciboSwapHtml}
-      </div>
+      ${reciboBlockHtml}
       <div class="arrow">⇄${!isSpecial && !isChecked ? `<button type="button" class="remove-manual-btn" title="Quitar esta fila del intercambio" onclick="removeTradeRow('${escId}')">✕</button>` : ''}</div>
-      <div class="sticker-block">
-        <div class="sticker-code ${doyNotNeeded ? 'not-needed' : ''} ${!isChecked && doyConflictInfo(doy) ? 'conflict' : ''}">${doy}${!isChecked ? doyLiveStockNoteHtml(doy, personNameForRow) : ''}</div>
-        <div class="sticker-label">${doyLabel} ${doyValueToggle}${doyNotNeededNote}</div>
-        ${doySwapHtml}
-      </div>
+      ${doyBlockHtml}
       ${note ? `<div class="stock-note-wrap" style="grid-column:1/6">${note}</div>` : ''}
     </div>`;
-
-  const maxExtras = Math.max(reciboExtras.length, doyExtras.length);
-  for (let i = 0; i < maxExtras; i++) {
-    const extraCell = (side, extrasArr) => {
-      const k = extrasArr[i];
-      if (!k) return '<div class="sticker-block empty-block"></div>';
-      const bucket = side === 'recibo' ? item.recibo_base_bucket : item.doy_base_bucket;
-      let swapHtml = '';
-      if (!isChecked) {
-        const candidates = extraCandidates(item.id, side, k);
-        if (candidates.length > 1) {
-          const same = candidates.filter(c => c.base_bucket === bucket);
-          const other = candidates.filter(c => c.base_bucket !== bucket);
-          const optHtml = c => `<option value="${c.key}" ${c.key === k ? 'selected' : ''}>${c.key}${side === 'doy' ? ` (x${c.qty})` : ''} — ${shortLabel(c.label)}</option>`;
-          let opts = '';
-          if (same.length) opts += `<optgroup label="Misma categoría">${same.map(optHtml).join('')}</optgroup>`;
-          if (other.length) opts += `<optgroup label="Otras categorías">${other.map(optHtml).join('')}</optgroup>`;
-          swapHtml = `<select class="swap-select" onchange="swapExtra('${escId}','${side}',${i},this.value)">${opts}</select>`;
-        }
-      }
-      const removeBtn = isChecked ? '' : `<button class="remove-extra-btn" onclick="removeExtra('${escId}','${side}',${i})">✕ quitar</button>`;
-      const kCN = codeNumFromKey(k);
-      const kNotNeeded = side === 'recibo' ? !necesitoHas(kCN.code, kCN.num) : !personNeedsThis(personNameForRow, kCN.code, kCN.num);
-      const kNotNeededNote = kNotNeeded ? `<span class="filler-note">🟣 Extra de relleno — ${side === 'recibo' ? 'vos no lo necesitás' : 'no lo necesita'}</span>` : '';
-      return `<div class="sticker-block extra-block">
-          <div class="sticker-code ${kNotNeeded ? 'filler' : ''} ${side === 'doy' && !isChecked && doyConflictInfo(k) ? 'conflict' : ''}">+ ${k}${side === 'doy' && !isChecked ? doyLiveStockNoteHtml(k, personNameForRow) : ''}</div>
-          <div class="sticker-label">${shortLabel(findLabelForKey(item.id, side, k))}${kNotNeededNote}</div>
-          ${swapHtml}
-          ${removeBtn}
-        </div>`;
-    };
-    html += `<div class="${rowClass} extra-row">
-        <div></div>
-        <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${escId}')" />
-        ${extraCell('recibo', reciboExtras)}
-        <div class="arrow"></div>
-        ${extraCell('doy', doyExtras)}
-      </div>`;
-  }
-
-  if (!isSpecial && !isChecked) {
-    html += `<div class="trade-row extra-row add-row">
-        <div></div><div></div>
-        <div>${reciboAddHtml}</div>
-        <div class="arrow"></div>
-        <div>${doyAddHtml}</div>
-      </div>`;
-  }
-
   html += `</div>`;
   return html;
 }
@@ -2371,7 +2245,7 @@ function computeSummary() {
     for (const pr of pairs) {
       totalTrades++;
       if (checked.has(pr.id)) doneTrades++;
-      else {
+      else if (effectiveDoy(pr)) {
         const key = effectiveDoy(pr);
         const used = usedCountFor(key, pr.id);
         const { remaining } = stockRemainingText(key, used);
@@ -2499,9 +2373,10 @@ function renderTrades() {
         }
       }
 
-      // Agregar a mano cualquier combinación real de su base de datos, sin
-      // depender de que el emparejamiento automático la haya armado sola
-      // (útil si su base de datos creció o el balance de categorías no dio).
+      // Único lugar donde se agrega o cambia cualquier sticker del trato:
+      // cualquier combinación real de la base de datos de ambos lados (no
+      // sólo lo que el emparejamiento automático armó solo), incluyendo
+      // dejar un lado en "nada" para un extra de relleno de un solo lado.
       const cid = cssId(name);
       const escName = name.replace(/'/g, "\\'");
       const manualReciboOpts = manualPairRecibCandidates(name);
@@ -2509,19 +2384,13 @@ function renderTrades() {
       html += `<div class="section-header">➕ Agregar otro intercambio</div>
         <div class="manual-add-row">
           <select id="manualRecibo-${cid}">
-            <option value="">Elegí lo que te da${manualReciboOpts.length ? ` (${manualReciboOpts.length})` : ''}...</option>
-            ${manualReciboOpts.map(c => {
-              const flagged = manualReciboOptFlag(name, c.key);
-              return `<option value="${c.key.replace(/"/g, '&quot;')}" ${flagged ? 'style="color:var(--red)"' : ''}>${flagged ? '🔴 ' : ''}${c.key} — ${shortLabel(c.label)}</option>`;
-            }).join('')}
+            <option value="">— Nada / elegí lo que te da${manualReciboOpts.length ? ` (${manualReciboOpts.length})` : ''} —</option>
+            ${manualCandidateOptionsHtml(name, manualReciboOpts, 'recibo')}
           </select>
           <span class="manual-arrow">⇄</span>
           <select id="manualDoy-${cid}">
-            <option value="">Elegí lo que le das${manualDoyOpts.length ? ` (${manualDoyOpts.length})` : ''}...</option>
-            ${manualDoyOpts.map(c => {
-              const flagged = manualDoyOptFlag(name, c.key);
-              return `<option value="${c.key.replace(/"/g, '&quot;')}" ${flagged ? 'style="color:var(--red)"' : ''}>${flagged ? '🔴 ' : ''}${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`;
-            }).join('')}
+            <option value="">— Nada / elegí lo que le das${manualDoyOpts.length ? ` (${manualDoyOpts.length})` : ''} —</option>
+            ${manualCandidateOptionsHtml(name, manualDoyOpts, 'doy')}
           </select>
           <button type="button" onclick="confirmAddManualPair('${escName}')">+ Agregar</button>
         </div>`;
@@ -2968,7 +2837,9 @@ function removePerson(name) {
   delete state.people[name];
   for (const id of Object.keys(swaps)) if (id.startsWith(name + '::')) delete swaps[id];
   for (const id of Object.keys(doySwaps)) if (id.startsWith(name + '::')) delete doySwaps[id];
-  for (const id of Object.keys(extras)) if (id.startsWith(name + '::')) delete extras[id];
+  delete manualPairs[name];
+  delete removedAutoPairs[name];
+  delete rowOrder[name];
   delete meetInfo[name];
   [...checked].forEach(id => { if (id.startsWith(name + '::')) checked.delete(id); });
   if (openPersonName === name) openPersonName = null;
@@ -3233,11 +3104,10 @@ function renderDbVentas() {
 // INIT
 // ============================================================================
 document.getElementById('resetBtn').addEventListener('click', async () => {
-  if (confirm('¿Reiniciar todo el progreso de intercambios? Esto desmarca todo, deshace cambios de sticker, quita extras y borra fecha/lugar/hora. NO borra tu base de datos (Tengo/Necesito/Personas).')) {
+  if (confirm('¿Reiniciar todo el progreso de intercambios? Esto desmarca todo, deshace cambios de sticker y borra fecha/lugar/hora. NO borra tu base de datos (Tengo/Necesito/Personas) ni los intercambios agregados a mano.')) {
     checked = new Set();
     swaps = {};
     doySwaps = {};
-    extras = {};
     meetInfo = {};
     removedAutoPairs = {};
     await saveTrackingState();
