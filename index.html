@@ -1776,7 +1776,9 @@ function tengoFilteredRows() {
   for (const code in state.tengo) {
     for (const numStr in state.tengo[code]) {
       const num = parseInt(numStr, 10);
-      all.push({ code, num, qty: state.tengo[code][numStr] });
+      const rawQty = state.tengo[code][numStr];
+      const given = usedCountFor(stickerDisplay(code, num), '');
+      all.push({ code, num, rawQty, given, qty: Math.max(0, rawQty - given) });
     }
   }
   all.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
@@ -1795,14 +1797,13 @@ function buildTengoListHtml() {
   const { filtered } = tengoFilteredRows();
   if (filtered.length === 0) return '<div class="db-empty">Sin resultados</div>';
   return filtered.map(r => {
-    const given = usedCountFor(stickerDisplay(r.code, r.num), '');
-    const givenNote = given > 0
-      ? `<span class="db-live-note">✅ ${given} de ${r.qty} ya entregado${given > 1 ? 's' : ''} (trato completado)</span>`
+    const givenNote = r.given > 0
+      ? `<span class="db-live-note">✅ ${r.given} ya entregado${r.given > 1 ? 's' : ''} (de ${r.rawQty} originales)</span>`
       : '';
     return `<div class="db-row">
       <span class="code">${stickerDisplay(r.code, r.num)}</span>
       <span class="label">${categoryLabelOf(r.code, r.num)}${givenNote}</span>
-      <input type="number" class="qty-input" min="1" value="${r.qty}" onchange="updateTengoQty('${r.code}',${r.num},this.value)" />
+      <input type="number" class="qty-input" min="0" value="${r.qty}" title="Cantidad disponible ahora mismo (ya descontando lo entregado)" onchange="updateTengoQty('${r.code}',${r.num},this.value)" />
       <button class="edit-value" title="Editar si es un sticker de valor especial" onclick="editPremium('${r.code}',${r.num})">✎</button>
       <button class="del" onclick="removeTengo('${r.code}',${r.num})">✕</button>
     </div>`;
@@ -1813,9 +1814,9 @@ function buildTengoSubtotalHtml() {
   const totalCopies = all.reduce((a, r) => a + r.qty, 0);
   const filteredCopies = filtered.reduce((a, r) => a + r.qty, 0);
   if (filtered.length === all.length) {
-    return `<div class="db-subtotal"><b>${all.length}</b> stickers únicos · <b>${totalCopies}</b> copias en total</div>`;
+    return `<div class="db-subtotal"><b>${all.length}</b> stickers únicos · <b>${totalCopies}</b> copias disponibles ahora</div>`;
   }
-  return `<div class="db-subtotal">Mostrando <b>${filtered.length}</b> de <b>${all.length}</b> stickers únicos (<b>${filteredCopies}</b> copias) — de un total de <b>${totalCopies}</b> copias</div>`;
+  return `<div class="db-subtotal">Mostrando <b>${filtered.length}</b> de <b>${all.length}</b> stickers únicos (<b>${filteredCopies}</b> copias) — de un total de <b>${totalCopies}</b> copias disponibles</div>`;
 }
 function necesitoFilteredRows() {
   const all = [];
@@ -1945,10 +1946,18 @@ function removeTengo(code, num) {
   saveDbState();
   renderAll();
 }
-function updateTengoQty(code, num, qty) {
-  qty = parseInt(qty, 10);
-  if (isNaN(qty) || qty <= 0) { removeTengo(code, num); return; }
-  state.tengo[code][String(num)] = qty;
+// El input de cantidad en Mi Inventario muestra/edita lo DISPONIBLE ahora
+// mismo (ya descontando lo entregado en tratos completados), no el crudo
+// histórico. Se traduce de vuelta sumando lo ya entregado, para no perder
+// esos tratos completados (el motor de emparejamiento necesita que el
+// crudo siga siendo > 0 mientras haya un trato hecho con ese sticker).
+function updateTengoQty(code, num, availableQty) {
+  availableQty = parseInt(availableQty, 10);
+  if (isNaN(availableQty) || availableQty < 0) availableQty = 0;
+  const given = usedCountFor(stickerDisplay(code, num), '');
+  const newRaw = availableQty + given;
+  if (newRaw <= 0) { removeTengo(code, num); return; }
+  state.tengo[code][String(num)] = newRaw;
   saveDbState();
   renderAll();
 }
