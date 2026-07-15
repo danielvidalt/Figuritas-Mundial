@@ -871,6 +871,16 @@ function chronoCompare(a, b) {
   return ta - tb;
 }
 
+// Lugar de encuentro del intercambio (no la ubicación/dirección de la
+// persona): el campo "Lugar" editable, o el meetPoint original si todavía no
+// se definió uno específico.
+function meetPlaceOf(name) {
+  const meet = meetInfo[name] || {};
+  if (meet.place !== undefined) return meet.place || '';
+  const person = state.people[name];
+  return (person && person.meetPoint) || '';
+}
+
 // Sincroniza personOrder con las personas elegibles actuales (agrega nuevas al
 // final, quita las que ya no corresponden). La primera vez (sin orden guardado)
 // arranca en orden cronológico.
@@ -907,8 +917,13 @@ function sortChronological() {
 }
 
 function sortByLocation() {
-  const names = syncPersonOrder().slice().sort((a, b) =>
-    (state.people[a].location || '').localeCompare(state.people[b].location || ''));
+  const names = syncPersonOrder().slice().sort((a, b) => {
+    const pa = meetPlaceOf(a), pb = meetPlaceOf(b);
+    if (!pa && !pb) return a.localeCompare(b);
+    if (!pa) return 1;
+    if (!pb) return -1;
+    return pa.localeCompare(pb);
+  });
   personOrder = names;
   sortMode = 'location';
   saveTrackingState();
@@ -1425,7 +1440,7 @@ function renderTrades() {
   const sortBarHtml = `<div class="sort-bar">
     <span class="sort-label">Ordenar por:</span>
     <button class="sort-btn ${sortMode === 'chrono' ? 'active' : ''}" onclick="sortChronological()">📅 Cronológico</button>
-    <button class="sort-btn ${sortMode === 'location' ? 'active' : ''}" onclick="sortByLocation()">📍 Ubicación</button>
+    <button class="sort-btn ${sortMode === 'location' ? 'active' : ''}" title="Ordena por el lugar de encuentro del intercambio" onclick="sortByLocation()">📍 Lugar de encuentro</button>
     <button class="sort-btn ${sortMode === 'count' ? 'active' : ''}" onclick="sortByTradeCount()">🔁 Cantidad</button>
     <span class="drag-hint">↕ Arrastrá el encabezado de una tarjeta para reordenar a mano</span>
   </div>`;
