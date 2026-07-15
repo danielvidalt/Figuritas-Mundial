@@ -1706,6 +1706,26 @@ function formatDateEs(isoDate) {
   const parts = isoDate.split('-');
   return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : isoDate;
 }
+// Suma el nombre del jugador entre paréntesis cuando el sticker es un
+// "jugador destacado" (premium) — útil sobre todo en el resumen de texto,
+// donde de otra forma sólo se ve el código.
+function keyWithPlayerName(key) {
+  const { code, num } = codeNumFromKey(key);
+  const player = premiumOf(code, num);
+  return player ? `${key} (${shortLabel(player)})` : key;
+}
+// Cuenta los stickers FÍSICOS de cada lado (contando extras) — con tratos
+// 1xN el total de un lado puede no coincidir con el del otro.
+function countTradeStickers(personName) {
+  const { special, pairs } = getMatches(personName);
+  let reciboCount = 0, doyCount = 0;
+  for (const s of special) { reciboCount++; doyCount++; }
+  for (const pr of pairs) {
+    reciboCount += 1 + getExtras(pr.id, 'recibo').length;
+    doyCount += 1 + getExtras(pr.id, 'doy').length;
+  }
+  return { reciboCount, doyCount };
+}
 function buildTradeSummaryText(personName) {
   const person = state.people[personName];
   const { special, pairs } = getMatches(personName);
@@ -1716,15 +1736,17 @@ function buildTradeSummaryText(personName) {
   const when = [meet.date ? formatDateEs(meet.date) : '', meet.time || ''].filter(Boolean).join(' - ');
   if (when) lines.push(`📅 ${when}${meetPlace ? ' · ' + meetPlace : ''}`);
   else if (meetPlace) lines.push(`📍 ${meetPlace}`);
+  const { reciboCount, doyCount } = countTradeStickers(personName);
+  lines.push(`📊 Recibís: ${reciboCount} sticker${reciboCount === 1 ? '' : 's'} · Das: ${doyCount} sticker${doyCount === 1 ? '' : 's'}`);
   lines.push('');
 
   let itemCount = 0;
   const pushItem = (recibo, doy, done) => {
     itemCount++;
-    lines.push(`${done ? '✅' : '•'} Te doy ${doy} — me das ${recibo}`);
+    lines.push(`${done ? '✅' : '•'} Te doy ${keyWithPlayerName(doy)} — me das ${keyWithPlayerName(recibo)}`);
   };
   const pushExtra = (key, side) => {
-    lines.push(`   + ${side === 'doy' ? 'también te doy' : 'también me das'} ${key}`);
+    lines.push(`   + ${side === 'doy' ? 'también te doy' : 'también me das'} ${keyWithPlayerName(key)}`);
   };
 
   if (special.length) {
@@ -1756,7 +1778,7 @@ function buildTradeSummaryText(personName) {
     lines.push('');
   }
 
-  lines.push(`Total: ${itemCount} intercambio${itemCount === 1 ? '' : 's'}`);
+  lines.push(`Total: ${itemCount} intercambio${itemCount === 1 ? '' : 's'} (${reciboCount} vs ${doyCount} stickers)`);
   return lines.join('\n').trim();
 }
 function exportTradeSummary(personName) {
@@ -2080,11 +2102,12 @@ function renderTrades() {
           <div style="font-size:12.5px;padding:4px 0 10px">${person.conflicto}</div></div>`;
       }
       if (total > 0) {
+        const { reciboCount, doyCount } = countTradeStickers(name);
         html += `<div class="trade-row trade-row-header">
           <div></div><div></div>
-          <div class="col-label">📥 Recibís (te da ${name.split(' ')[0]})</div>
+          <div class="col-label">📥 Recibís (te da ${name.split(' ')[0]}) — <b>${reciboCount}</b> sticker${reciboCount === 1 ? '' : 's'}</div>
           <div></div>
-          <div class="col-label">📤 Das (le das vos)</div>
+          <div class="col-label">📤 Das (le das vos) — <b>${doyCount}</b> sticker${doyCount === 1 ? '' : 's'}</div>
         </div>`;
       }
       if (special.length) {
