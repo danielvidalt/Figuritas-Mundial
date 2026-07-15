@@ -228,8 +228,14 @@
   .trade-row.blocked { background: var(--red-soft); opacity: 0.75; }
   .row-drag-handle { cursor: grab; touch-action: none; color: var(--muted); font-size: 13px; line-height: 1; padding-top: 4px; text-align: center; }
   .row-drag-handle:active { cursor: grabbing; }
-  .rows-list .trade-row.sortable-ghost { opacity: 0.35; }
-  .rows-list .trade-row.sortable-drag, .rows-list .trade-row.sortable-fallback { box-shadow: 0 6px 18px rgba(0,0,0,0.2); background: #fffdf7; }
+  .rows-list .trade-item.sortable-ghost { opacity: 0.35; }
+  .rows-list .trade-item.sortable-drag, .rows-list .trade-item.sortable-fallback { box-shadow: 0 6px 18px rgba(0,0,0,0.2); background: #fffdf7; }
+  .trade-row.extra-row { border-top: none; padding-top: 4px; padding-bottom: 4px; }
+  .sticker-block.extra-block .sticker-code { font-size: 13px; }
+  .remove-extra-btn { font-size: 10px; color: var(--red); background: none; border: none; cursor: pointer; padding: 0; margin-top: 2px; }
+  .remove-extra-btn:hover { text-decoration: underline; }
+  .add-row { padding-top: 2px; }
+  .add-row .add-extra-row { margin-top: 0; }
   .section-header {
     padding: 8px 16px 4px; border-top: 1px solid var(--paper-line);
     font-family: 'Barlow Condensed', sans-serif; font-size: 12.5px; font-weight: 700;
@@ -299,9 +305,6 @@
   .swap-select:disabled { opacity: 0.4; cursor: not-allowed; }
   .swap-select.overridden { border-color: var(--gold); background: var(--gold-soft); font-weight: 600; }
 
-  .extras-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-  .extra-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--pitch); color: var(--paper); font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; padding: 2px 6px 2px 8px; border-radius: 999px; }
-  .extra-chip button { background: rgba(255,255,255,0.2); border: none; color: var(--paper); border-radius: 50%; width: 15px; height: 15px; font-size: 10px; line-height: 1; cursor: pointer; padding: 0; }
   .add-extra-row { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; align-items: center; }
   .add-extra-row select { font-family: 'Inter', sans-serif; font-size: 10.5px; border: 1px dashed var(--paper-line); border-radius: 6px; padding: 2px 4px; background: #fff; max-width: 130px; }
   .add-extra-row button { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700; border: 1px solid var(--pitch); color: var(--pitch); background: transparent; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
@@ -1031,6 +1034,7 @@ function initRowSortables() {
   document.querySelectorAll('.people-group .rows-list').forEach(el => {
     const inst = new Sortable(el, {
       handle: '.row-drag-handle',
+      draggable: '.trade-item',
       animation: 150,
       forceFallback: true,
       fallbackTolerance: 3,
@@ -1368,7 +1372,8 @@ function renderTradeRow(item, isSpecial) {
     ? `<button type="button" class="value-toggle ${doyAdjusted ? 'active' : ''}" ${isChecked ? 'disabled' : ''} title="${doyAdjusted ? 'Restaurar su valor real de jugador destacado' : 'Bajar su valor a Jugador normal solo para este trato'}" onclick="toggleValueOverride('${escId}','doy')">⚖️</button>`
     : '';
 
-  let reciboSwapHtml = '', doySwapHtml = '', reciboExtrasHtml = '', doyExtrasHtml = '', reciboAddHtml = '', doyAddHtml = '';
+  let reciboSwapHtml = '', doySwapHtml = '', reciboAddHtml = '', doyAddHtml = '';
+  let reciboExtras = [], doyExtras = [];
   if (!isSpecial) {
     const personName = pairPersonName(item.id);
 
@@ -1401,14 +1406,8 @@ function renderTradeRow(item, isSpecial) {
       doySwapHtml = `<select class="swap-select ${isDoyOverridden ? 'overridden' : ''}" data-pair="${item.id}" onchange="swapDoy(this)" ${isChecked ? 'disabled' : ''}>${opts}</select>`;
     }
 
-    const reciboExtras = getExtras(item.id, 'recibo');
-    const doyExtras = getExtras(item.id, 'doy');
-    if (reciboExtras.length) {
-      reciboExtrasHtml = `<div class="extras-list">${reciboExtras.map((k, i) => `<span class="extra-chip" title="${findLabelForKey(item.id, 'recibo', k)}">+ ${k} ${isChecked ? '' : `<button onclick="removeExtra('${item.id}','recibo',${i})">✕</button>`}</span>`).join('')}</div>`;
-    }
-    if (doyExtras.length) {
-      doyExtrasHtml = `<div class="extras-list">${doyExtras.map((k, i) => `<span class="extra-chip" title="${findLabelForKey(item.id, 'doy', k)}">+ ${k} ${isChecked ? '' : `<button onclick="removeExtra('${item.id}','doy',${i})">✕</button>`}</span>`).join('')}</div>`;
-    }
+    reciboExtras = getExtras(item.id, 'recibo');
+    doyExtras = getExtras(item.id, 'doy');
 
     if (!isChecked) {
       const reciboSameOpts = computeAddCandidates(item.id, 'recibo', 'same');
@@ -1432,22 +1431,58 @@ function renderTradeRow(item, isSpecial) {
 
   const dragHandleHtml = isSpecial ? '<div></div>' : '<div class="row-drag-handle" title="Arrastrar para reordenar dentro de esta categoría">⠿</div>';
 
-  return `<div class="${rowClass}" data-row-id="${item.id.replace(/"/g, '&quot;')}">
+  // Fila base: el par 1x1 original. Si hay extras (para tratos 1xN o Nx1), se
+  // agregan como filas propias abajo, con la columna del otro lado vacía —
+  // así se ve como una sola tabla en vez de un tag ambiguo pegado al lado.
+  let html = `<div class="trade-item" data-row-id="${item.id.replace(/"/g, '&quot;')}">`;
+  html += `<div class="${rowClass}">
       ${dragHandleHtml}
       <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${item.id.replace(/'/g, "\\'")}')" />
       <div class="sticker-block">
         <div class="sticker-code">${recibo}</div>
         <div class="sticker-label">${reciboLabel} ${reciboValueToggle}</div>
-        ${reciboSwapHtml}${reciboExtrasHtml}${reciboAddHtml}
+        ${reciboSwapHtml}
       </div>
       <div class="arrow">⇄</div>
       <div class="sticker-block">
         <div class="sticker-code">${doy}</div>
         <div class="sticker-label">${doyLabel} ${doyValueToggle}</div>
-        ${doySwapHtml}${doyExtrasHtml}${doyAddHtml}
+        ${doySwapHtml}
       </div>
       ${note ? `<div class="stock-note-wrap" style="grid-column:1/6">${note}</div>` : ''}
     </div>`;
+
+  const maxExtras = Math.max(reciboExtras.length, doyExtras.length);
+  for (let i = 0; i < maxExtras; i++) {
+    const extraCell = (side, extrasArr) => {
+      const k = extrasArr[i];
+      if (!k) return '<div class="sticker-block empty-block"></div>';
+      const removeBtn = isChecked ? '' : `<button class="remove-extra-btn" onclick="removeExtra('${item.id.replace(/'/g, "\\'")}','${side}',${i})">✕ quitar</button>`;
+      return `<div class="sticker-block extra-block">
+          <div class="sticker-code">+ ${k}</div>
+          <div class="sticker-label">${shortLabel(findLabelForKey(item.id, side, k))}</div>
+          ${removeBtn}
+        </div>`;
+    };
+    html += `<div class="${rowClass} extra-row">
+        <div></div><div></div>
+        ${extraCell('recibo', reciboExtras)}
+        <div class="arrow"></div>
+        ${extraCell('doy', doyExtras)}
+      </div>`;
+  }
+
+  if (!isSpecial && !isChecked) {
+    html += `<div class="trade-row extra-row add-row">
+        <div></div><div></div>
+        <div>${reciboAddHtml}</div>
+        <div class="arrow"></div>
+        <div>${doyAddHtml}</div>
+      </div>`;
+  }
+
+  html += `</div>`;
+  return html;
 }
 
 function renderSaleRow(buyer, item) {
