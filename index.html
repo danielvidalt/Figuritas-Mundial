@@ -20,6 +20,8 @@
     --red-soft: #f6dedc;
     --orange: #d9730d;
     --orange-soft: #fbe6d0;
+    --violet: #7c3aed;
+    --violet-soft: #ede9fe;
     --green-check: #2f7d4f;
     --green-soft: #e1f0e5;
     --card-radius: 10px;
@@ -329,6 +331,8 @@
   .live-stock-note.danger { color: var(--red); }
   .live-stock-note.conflict { color: var(--orange); font-weight: 700; }
   .sticker-code.conflict { color: var(--orange); }
+  .sticker-code.filler { color: var(--violet); }
+  .filler-note { display: block; color: var(--violet); font-weight: 600; }
   .value-toggle {
     border: none; background: transparent; cursor: pointer; font-size: 12px;
     padding: 0 2px; opacity: 0.55; vertical-align: middle;
@@ -1754,13 +1758,52 @@ function computeAddCandidates(pairId, side, scope) {
       .sort((a, b) => a.key.localeCompare(b.key));
   }
 }
+// Candidatos para sumar como extra que NO le sirven a quien los recibe (no
+// están en necesito/need) pero igual están disponibles — el "relleno" que
+// se usa mucho en la negociación real cuando un lado tiene una copia de más
+// para compensar y no tiene nada que a la otra parte le haga falta.
+function computeAddCandidatesNotUseful(pairId, side, scope) {
+  const pair = findPairById(pairId);
+  if (!pair) return [];
+  const personName = pairPersonName(pairId);
+  if (side === 'recibo') {
+    const bucket = pair.recibo_base_bucket;
+    return personAllHaveCandidates(personName)
+      .filter(c => scope === 'all' || c.base_bucket === bucket)
+      .filter(c => { const { code, num } = codeNumFromKey(c.key); return !necesitoHas(code, num); })
+      .filter(c => usedReciboCountForPerson(personName, c.key, '') < c.qty)
+      .sort((a, b) => a.key.localeCompare(b.key));
+  } else {
+    const bucket = pair.doy_base_bucket;
+    return danielStockList()
+      .filter(c => scope === 'all' || c.base_bucket === bucket)
+      .filter(c => !personNeedList(personName).includes(c.key))
+      .filter(c => (c.qty - doyLiveUsageCount(c.key)) > 0)
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }
+}
+// Arma el HTML de opciones del "+ sumar": primero lo que sirve, y si hay
+// relleno disponible (no le sirve a quien lo recibe) lo agrega en un grupo
+// aparte, marcado con 🟣 — visible en todos los navegadores, a diferencia
+// de un color CSS en <option> que algunos (ej. macOS) ignoran.
+function addExtraPickOptionsHtml(pairId, side, scope) {
+  const useful = computeAddCandidates(pairId, side, scope);
+  const notUseful = computeAddCandidatesNotUseful(pairId, side, scope);
+  const optHtml = c => `<option value="${c.key}">${c.key}${side === 'doy' ? ` (x${c.qty})` : ''} — ${shortLabel(c.label)}</option>`;
+  const fillerOptHtml = c => `<option value="${c.key}" style="color:var(--violet)">🟣 ${c.key}${side === 'doy' ? ` (x${c.qty})` : ''} — ${shortLabel(c.label)}</option>`;
+  let html = useful.map(optHtml).join('');
+  if (notUseful.length) {
+    const label = side === 'doy' ? '🟣 No le sirve — relleno disponible' : '🟣 No lo necesito — relleno disponible';
+    html += `<optgroup label="${label}">${notUseful.map(fillerOptHtml).join('')}</optgroup>`;
+  }
+  return html || '<option value="">(sin opciones disponibles)</option>';
+}
 function refreshAddCandidates(scopeSelectEl) {
   const pairId = scopeSelectEl.dataset.pair;
   const side = scopeSelectEl.dataset.side;
   const scope = scopeSelectEl.value;
   const candidateSelect = scopeSelectEl.parentElement.querySelector('.add-extra-pick');
-  const list = computeAddCandidates(pairId, side, scope);
-  candidateSelect.innerHTML = list.map(c => `<option value="${c.key}">${c.key}${side === 'doy' ? ` (x${c.qty})` : ''} — ${shortLabel(c.label)}</option>`).join('') || '<option value="">(sin opciones disponibles)</option>';
+  candidateSelect.innerHTML = addExtraPickOptionsHtml(pairId, side, scope);
 }
 function confirmAddExtra(btnEl) {
   const pairId = btnEl.dataset.pair;
@@ -2194,20 +2237,18 @@ function renderTradeRow(item, isSpecial) {
     doyExtras = getExtras(item.id, 'doy');
 
     if (!isChecked) {
-      const reciboSameOpts = computeAddCandidates(item.id, 'recibo', 'same');
       reciboAddHtml = `<div class="add-extra-row">
         <select class="add-extra-scope" data-pair="${item.id}" data-side="recibo" onchange="refreshAddCandidates(this)">
           <option value="same">Misma categoría</option><option value="all">Todas las categorías</option>
         </select>
-        <select class="add-extra-pick">${reciboSameOpts.map(c => `<option value="${c.key}">${c.key} — ${shortLabel(c.label)}</option>`).join('') || '<option value="">(sin opciones)</option>'}</select>
+        <select class="add-extra-pick">${addExtraPickOptionsHtml(item.id, 'recibo', 'same')}</select>
         <button data-pair="${item.id}" data-side="recibo" onclick="confirmAddExtra(this)">+ sumar</button>
       </div>`;
-      const doySameOpts = computeAddCandidates(item.id, 'doy', 'same');
       doyAddHtml = `<div class="add-extra-row">
         <select class="add-extra-scope" data-pair="${item.id}" data-side="doy" onchange="refreshAddCandidates(this)">
           <option value="same">Misma categoría</option><option value="all">Todas las categorías</option>
         </select>
-        <select class="add-extra-pick">${doySameOpts.map(c => `<option value="${c.key}">${c.key} (x${c.qty}) — ${shortLabel(c.label)}</option>`).join('') || '<option value="">(sin opciones)</option>'}</select>
+        <select class="add-extra-pick">${addExtraPickOptionsHtml(item.id, 'doy', 'same')}</select>
         <button data-pair="${item.id}" data-side="doy" onclick="confirmAddExtra(this)">+ sumar</button>
       </div>`;
     }
@@ -2258,9 +2299,9 @@ function renderTradeRow(item, isSpecial) {
       const removeBtn = isChecked ? '' : `<button class="remove-extra-btn" onclick="removeExtra('${escId}','${side}',${i})">✕ quitar</button>`;
       const kCN = codeNumFromKey(k);
       const kNotNeeded = side === 'recibo' ? !necesitoHas(kCN.code, kCN.num) : !personNeedsThis(personNameForRow, kCN.code, kCN.num);
-      const kNotNeededNote = kNotNeeded ? `<span class="not-needed-note">🔴 ${side === 'recibo' ? 'Vos no lo necesitás' : 'No lo necesita'}</span>` : '';
+      const kNotNeededNote = kNotNeeded ? `<span class="filler-note">🟣 Extra de relleno — ${side === 'recibo' ? 'vos no lo necesitás' : 'no lo necesita'}</span>` : '';
       return `<div class="sticker-block extra-block">
-          <div class="sticker-code ${kNotNeeded ? 'not-needed' : ''} ${side === 'doy' && !isChecked && doyConflictInfo(k) ? 'conflict' : ''}">+ ${k}${side === 'doy' && !isChecked ? doyLiveStockNoteHtml(k, personNameForRow) : ''}</div>
+          <div class="sticker-code ${kNotNeeded ? 'filler' : ''} ${side === 'doy' && !isChecked && doyConflictInfo(k) ? 'conflict' : ''}">+ ${k}${side === 'doy' && !isChecked ? doyLiveStockNoteHtml(k, personNameForRow) : ''}</div>
           <div class="sticker-label">${shortLabel(findLabelForKey(item.id, side, k))}${kNotNeededNote}</div>
           ${swapHtml}
           ${removeBtn}
