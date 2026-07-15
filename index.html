@@ -64,7 +64,18 @@
     gap: 6px;
   }
   .pill.warn { border-color: rgba(240,196,25,0.6); color: var(--gold-soft); }
+  .pill.danger { border-color: rgba(179,38,30,0.7); color: #ffb4ae; }
   .pill b { font-family: 'Archivo Black', sans-serif; font-weight: 400; }
+
+  .stock-conflict-banner {
+    background: var(--red-soft); border: 1px solid var(--red); border-radius: var(--card-radius);
+    padding: 12px 16px; margin-bottom: 16px; font-size: 12.5px; color: var(--ink);
+  }
+  .stock-conflict-banner h3 {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 15px; margin: 0 0 8px; color: var(--red);
+  }
+  .stock-conflict-banner ul { margin: 0; padding-left: 18px; }
+  .stock-conflict-banner li { margin-bottom: 4px; line-height: 1.4; }
 
   .tabs { display: flex; gap: 4px; }
   .tab-btn {
@@ -1564,6 +1575,38 @@ function doyLiveStockNoteHtml(key) {
   const remaining = total - doyLiveUsageCount(key);
   return ` <span class="live-stock-note${remaining < 0 ? ' danger' : ''}">(quedan ${remaining})</span>`;
 }
+// Detecta conflictos de stock COMPARTIDO entre personas: un mismo sticker
+// mío (lado "doy") prometido, entre TODOS los intercambios pendientes de
+// TODAS las personas, más veces de las que tengo en stock. A propósito NO
+// cambia ni reordena nada solo — sólo lo señala para resolverlo a mano
+// (swap, quitar la fila, etc.), así los cambios en el trato de una persona
+// nunca reescriben en silencio el de otra.
+function computeStockConflicts() {
+  const usage = {};
+  for (const name of Object.keys(state.people)) {
+    const { special, pairs } = getMatches(name);
+    const bump = key => {
+      if (!usage[key]) usage[key] = { count: 0, people: new Set() };
+      usage[key].count++;
+      usage[key].people.add(name);
+    };
+    for (const s of special) bump(stickerDisplay(s.doy_code, s.doy_num));
+    for (const pr of pairs) {
+      bump(effectiveDoy(pr));
+      for (const k of getExtras(pr.id, 'doy')) bump(k);
+    }
+  }
+  const conflicts = [];
+  for (const key in usage) {
+    const { code, num } = codeNumFromKey(key);
+    const total = tengoQty(code, num);
+    if (usage[key].count > total) {
+      conflicts.push({ key, total, used: usage[key].count, people: [...usage[key].people] });
+    }
+  }
+  conflicts.sort((a, b) => a.key.localeCompare(b.key));
+  return conflicts;
+}
 
 // ============================================================================
 // EXTRAS (sumar stickers para compensar valor)
@@ -2280,9 +2323,16 @@ function computeSummary() {
 
 function renderTrades() {
   const { totalTrades, doneTrades, blockedTrades } = computeSummary();
+  const stockConflicts = computeStockConflicts();
   document.getElementById('summaryBar').innerHTML = `
     <div class="pill">✓ <b>${doneTrades}</b>/${totalTrades} intercambios hechos</div>
-    ${blockedTrades > 0 ? `<div class="pill warn">⚠ <b>${blockedTrades}</b> bloqueados por falta de stock</div>` : ''}`;
+    ${blockedTrades > 0 ? `<div class="pill warn">⚠ <b>${blockedTrades}</b> bloqueados por falta de stock</div>` : ''}
+    ${stockConflicts.length > 0 ? `<div class="pill danger">🔴 <b>${stockConflicts.length}</b> conflicto${stockConflicts.length === 1 ? '' : 's'} de stock entre personas</div>` : ''}`;
+
+  const conflictBannerHtml = stockConflicts.length ? `<div class="stock-conflict-banner">
+    <h3>🔴 Conflictos de stock compartido — resolvé a mano</h3>
+    <ul>${stockConflicts.map(c => `<li><b>${c.key}</b>: comprometido ${c.used} ${c.used === 1 ? 'vez' : 'veces'} pero tenés ${c.total} — entre: ${c.people.join(', ')}. Cambiá el sticker o eliminá la fila en alguno de esos intercambios.</li>`).join('')}</ul>
+  </div>` : '';
 
   const sortBarHtml = `<div class="sort-bar">
     <span class="sort-label">Ordenar por:</span>
@@ -2423,7 +2473,7 @@ function renderTrades() {
     <div id="peopleList-completados" class="people-group">${completadosNames.map(renderPersonCard).join('')}</div>`;
   }
 
-  document.getElementById('page-trades').innerHTML = sortBarHtml + groupsHtml;
+  document.getElementById('page-trades').innerHTML = conflictBannerHtml + sortBarHtml + groupsHtml;
   document.getElementById('footerText').innerHTML = 'Marca un intercambio como hecho apenas lo confirmes en persona. Si el mismo sticker tuyo está comprometido en otro trato, ese trato se bloquea automáticamente. Cada lado tiene su propio menú para cambiar de sticker, y un cuadro para sumar stickers extra cuando uno vale más que el otro. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
   initPeopleSortable();
   initRowSortables();
