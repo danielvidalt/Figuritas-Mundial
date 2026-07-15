@@ -252,7 +252,32 @@
     padding: 8px 16px 4px; border-top: 1px solid var(--paper-line);
     font-family: 'Barlow Condensed', sans-serif; font-size: 12.5px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.03em; color: var(--pitch-dark); background: var(--paper);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
   }
+  .explode-toggle {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 10.5px; font-weight: 700; text-transform: none;
+    background: #fff; border: 1px solid var(--paper-line); color: var(--pitch); border-radius: 999px;
+    padding: 3px 9px; cursor: pointer; letter-spacing: normal;
+  }
+  .explode-toggle:hover { background: var(--pitch); color: #fff; }
+  .explode-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; padding: 8px 16px; }
+  .explode-col-header {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 10.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+  }
+  .explode-col { display: flex; flex-direction: column; gap: 6px; min-height: 30px; }
+  .explode-chip {
+    position: relative; background: #fffdf7; border: 1px solid var(--paper-line); border-radius: 8px;
+    padding: 6px 10px; cursor: grab; touch-action: none;
+  }
+  .explode-chip:active { cursor: grabbing; }
+  .explode-chip.sortable-ghost { opacity: 0.35; }
+  .explode-chip.sortable-drag, .explode-chip.sortable-fallback { box-shadow: 0 6px 14px rgba(0,0,0,0.2); background: #fff; }
+  .explode-extra-badge {
+    position: absolute; top: 4px; right: 6px; font-family: 'Barlow Condensed', sans-serif;
+    font-size: 10px; font-weight: 700; color: var(--gold);
+  }
+  .explode-hint { font-size: 11px; color: var(--muted); padding: 0 16px 10px; margin: 0; }
   .people-group { margin-bottom: 8px; }
   .group-header {
     font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 700;
@@ -836,6 +861,8 @@ var pickerSaleNeed = {};
 let _matchCache = {};
 let personSortableInstances = [];
 let rowSortableInstances = [];
+let explodeSortableInstances = [];
+var explodedSections = new Set();
 var pendingCompletePerson = null;
 
 function getMatches(personName) {
@@ -1571,6 +1598,94 @@ function togglePersonCollapse(name) {
   renderTrades();
 }
 
+// ============================================================================
+// MODO "EXPLOTAR" — reordenar recibo y doy como dos columnas INDEPENDIENTES
+// dentro de una sección, en vez de mover la fila entera. Cada columna es su
+// propio Sortable; la posición final (misma fila = misma posición en ambas
+// columnas) define qué se empareja con qué. Las posiciones (slots) no
+// cambian — sólo qué sticker ocupa cada lado — así que reusa exactamente el
+// mismo mecanismo de swaps/doySwaps que ya usa el desplegable, nada nuevo
+// que persistir por separado.
+function explodeKeyOf(personName, sectionKey) {
+  return `${personName}::${sectionKey}`;
+}
+function toggleExplode(personName, sectionKey) {
+  const key = explodeKeyOf(personName, sectionKey);
+  if (explodedSections.has(key)) explodedSections.delete(key); else explodedSections.add(key);
+  renderTrades();
+}
+function renderExplodedColumns(personName, sectionKey, orderedIds, byId) {
+  let reciboHtml = '', doyHtml = '';
+  for (const id of orderedIds) {
+    const item = byId[id];
+    const reciboKey = effectiveRecibo(item);
+    const doyKey = effectiveDoy(item);
+    const reciboExtrasCount = getExtras(id, 'recibo').length;
+    const doyExtrasCount = getExtras(id, 'doy').length;
+    const reciboCN = codeNumFromKey(reciboKey);
+    const doyCN = codeNumFromKey(doyKey);
+    const reciboNotNeeded = !necesitoHas(reciboCN.code, reciboCN.num);
+    const doyNotNeeded = !personNeedsThis(personName, doyCN.code, doyCN.num);
+    reciboHtml += `<div class="explode-chip" data-key="${reciboKey.replace(/"/g, '&quot;')}">
+        <div class="sticker-code ${reciboNotNeeded ? 'not-needed' : ''}">${reciboKey}</div>
+        <div class="sticker-label">${shortLabel(effectiveReciboLabel(item))}</div>
+        ${reciboExtrasCount ? `<span class="explode-extra-badge">+${reciboExtrasCount}</span>` : ''}
+      </div>`;
+    doyHtml += `<div class="explode-chip" data-key="${doyKey.replace(/"/g, '&quot;')}">
+        <div class="sticker-code ${doyNotNeeded ? 'not-needed' : ''}">${doyKey}</div>
+        <div class="sticker-label">${shortLabel(effectiveDoyLabel(item))}</div>
+        ${doyExtrasCount ? `<span class="explode-extra-badge">+${doyExtrasCount}</span>` : ''}
+      </div>`;
+  }
+  // El orden de slots (qué par ocupa cada POSICIÓN) va en el contenedor, no
+  // en cada ficha — así al arrastrar sólo se mueve la clave (el sticker),
+  // nunca la identidad del slot, que es lo que realmente arma el nuevo
+  // emparejamiento por posición.
+  const escPerson = personName.replace(/"/g, '&quot;');
+  const slotOrderAttr = JSON.stringify(orderedIds).replace(/"/g, '&quot;');
+  return `<div class="explode-columns">
+      <div class="explode-col-header">📥 Recibís</div>
+      <div class="explode-col-header">📤 Das</div>
+      <div class="explode-col" data-person-name="${escPerson}" data-section="${sectionKey}" data-side="recibo" data-slot-order="${slotOrderAttr}">${reciboHtml}</div>
+      <div class="explode-col" data-person-name="${escPerson}" data-section="${sectionKey}" data-side="doy" data-slot-order="${slotOrderAttr}">${doyHtml}</div>
+    </div>
+    <p class="explode-hint">↕ Arrastrá cada columna por separado — la fila resultante (misma posición en las dos) define el nuevo emparejamiento.</p>`;
+}
+function commitExplodeOrder(personName, side) {
+  const col = document.querySelector(`.explode-col[data-side="${side}"][data-person-name="${CSS.escape(personName)}"]`);
+  if (!col) return;
+  const slotOrder = JSON.parse(col.dataset.slotOrder);
+  const newKeys = Array.from(col.children).map(chip => chip.dataset.key);
+  const store = side === 'recibo' ? swaps : doySwaps;
+  slotOrder.forEach((slotId, i) => {
+    const newKey = newKeys[i];
+    const item = findPairById(slotId);
+    if (!item || newKey === undefined) return;
+    const defaultKey = side === 'recibo'
+      ? stickerDisplay(item.recibo_code, item.recibo_num)
+      : stickerDisplay(item.doy_code, item.doy_num);
+    if (newKey === defaultKey) delete store[slotId]; else store[slotId] = newKey;
+  });
+  saveTrackingState();
+  renderAll();
+}
+function initExplodeSortables() {
+  explodeSortableInstances.forEach(inst => inst.destroy());
+  explodeSortableInstances = [];
+  if (typeof Sortable === 'undefined') return;
+  document.querySelectorAll('.explode-col').forEach(el => {
+    const inst = new Sortable(el, {
+      animation: 150,
+      forceFallback: true,
+      fallbackTolerance: 3,
+      onEnd: function () {
+        commitExplodeOrder(el.dataset.personName, el.dataset.side);
+      },
+    });
+    explodeSortableInstances.push(inst);
+  });
+}
+
 // Atajo desde la tarjeta de una persona en Intercambios hacia su ficha en
 // Base de Datos > Personas, ya abierta y a la vista, para agregar/sacar lo
 // que tiene o necesita sin perder el hilo. Como todo se re-renderiza desde
@@ -1914,10 +2029,17 @@ function renderTrades() {
         const byId = {};
         for (const pr of items) byId[pr.id] = pr;
         const orderedIds = syncSectionOrder(name, sec.key, items.map(pr => pr.id));
-        html += `<div class="section-header">${sec.label} (${items.length})</div>`;
-        html += `<div class="rows-list" data-person-name="${name.replace(/"/g, '&quot;')}" data-section="${sec.key}">`;
-        for (const id of orderedIds) html += renderTradeRow(byId[id], false);
-        html += `</div>`;
+        const isExploded = explodedSections.has(explodeKeyOf(name, sec.key));
+        html += `<div class="section-header">${sec.label} (${items.length})
+          <button type="button" class="explode-toggle" onclick="toggleExplode('${name.replace(/'/g, "\\'")}','${sec.key}')">${isExploded ? '🔒 Volver a filas' : '🔓 Reordenar por columnas'}</button>
+        </div>`;
+        if (isExploded) {
+          html += renderExplodedColumns(name, sec.key, orderedIds, byId);
+        } else {
+          html += `<div class="rows-list" data-person-name="${name.replace(/"/g, '&quot;')}" data-section="${sec.key}">`;
+          for (const id of orderedIds) html += renderTradeRow(byId[id], false);
+          html += `</div>`;
+        }
       }
 
       // Agregar a mano cualquier combinación real de su base de datos, sin
@@ -1961,6 +2083,7 @@ function renderTrades() {
   document.getElementById('footerText').innerHTML = 'Marca un intercambio como hecho apenas lo confirmes en persona. Si el mismo sticker tuyo está comprometido en otro trato, ese trato se bloquea automáticamente. Cada lado tiene su propio menú para cambiar de sticker, y un cuadro para sumar stickers extra cuando uno vale más que el otro. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
   initPeopleSortable();
   initRowSortables();
+  initExplodeSortables();
   updateHeaderHeightVar();
 }
 
