@@ -577,6 +577,33 @@ function sectionKeyOf(baseBucketValue) {
   const found = TRADE_SECTIONS.find(s => s.match(baseBucketValue));
   return found ? found.key : 'normales';
 }
+const SECTION_PRIORITY = {};
+TRADE_SECTIONS.forEach((s, i) => { SECTION_PRIORITY[s.key] = i; });
+
+// Bucket de un sticker a partir de su "key" de display (ej: "ARG 5",
+// "FWC 🌎 3") sin depender de que siga apareciendo en tengo/necesito —
+// funciona igual que la búsqueda de código real en stockRemainingText.
+function bucketOfKey(key) {
+  const parts = key.split(' ');
+  const num = parseInt(parts[parts.length - 1], 10);
+  const label = parts.slice(0, -1).join(' ');
+  let code = label;
+  for (const c in SEED.fwcLabels) if (SEED.fwcLabels[c] === label) code = c;
+  return baseBucket(code, num);
+}
+// De varios buckets (recibo, doy, extras de cada lado) devuelve la sección
+// MÁS VALIOSA según el orden de TRADE_SECTIONS — así un trato con cualquier
+// sticker especial/destacado de un lado queda clasificado por ese lado,
+// aunque el otro lado sea de una categoría más baja.
+function mostValuableSectionKey(buckets) {
+  let best = null;
+  for (const b of buckets) {
+    if (!b) continue;
+    const key = sectionKeyOf(b);
+    if (best === null || SECTION_PRIORITY[key] < SECTION_PRIORITY[best]) best = key;
+  }
+  return best || 'normales';
+}
 
 function categoryLabelOf(code, num) {
   const premium = premiumOf(code, num);
@@ -1293,6 +1320,22 @@ function stockRemainingText(stickerKey, usedExcl) {
 function getExtras(pairId, side) {
   return (extras[pairId] && extras[pairId][side]) || [];
 }
+// Sección de un ítem de intercambio teniendo en cuenta el sticker ACTUAL en
+// cada lado (después de swaps) y sus extras — no el bucket original con el
+// que se generó el par. Así, si cambiás lo que das/recibís a otra categoría,
+// el ítem se reclasifica solo a la sección correspondiente.
+function tradeItemSectionKey(item, isSpecial) {
+  if (isSpecial) {
+    return mostValuableSectionKey([
+      baseBucket(item.recibo_code, item.recibo_num),
+      baseBucket(item.doy_code, item.doy_num),
+    ]);
+  }
+  const buckets = [bucketOfKey(effectiveRecibo(item)), bucketOfKey(effectiveDoy(item))];
+  for (const k of getExtras(item.id, 'recibo')) buckets.push(bucketOfKey(k));
+  for (const k of getExtras(item.id, 'doy')) buckets.push(bucketOfKey(k));
+  return mostValuableSectionKey(buckets);
+}
 function addExtra(pairId, side, key) {
   if (!key) return;
   if (!extras[pairId]) extras[pairId] = { recibo: [], doy: [] };
@@ -1720,7 +1763,7 @@ function renderTrades() {
       }
       const bySection = {};
       for (const pr of pairs) {
-        const secKey = sectionKeyOf(pr.recibo_base_bucket);
+        const secKey = tradeItemSectionKey(pr, false);
         (bySection[secKey] = bySection[secKey] || []).push(pr);
       }
       for (const sec of TRADE_SECTIONS) {
