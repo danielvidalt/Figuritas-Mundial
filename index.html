@@ -294,6 +294,25 @@
   .value-toggle:disabled { cursor: not-allowed; opacity: 0.3; }
   .done .sticker-code { text-decoration: line-through; color: var(--muted); }
   .arrow { text-align: center; color: var(--muted); font-size: 15px; padding-top: 2px; }
+  .remove-manual-btn {
+    display: block; margin: 3px auto 0; border: none; background: var(--red-soft); color: var(--red);
+    border-radius: 50%; width: 16px; height: 16px; font-size: 9px; line-height: 1; cursor: pointer; padding: 0;
+  }
+  .remove-manual-btn:hover { background: var(--red); color: #fff; }
+  .manual-add-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 16px; background: var(--paper);
+  }
+  .manual-add-row select {
+    flex: 1; min-width: 160px; font-family: 'Inter', sans-serif; font-size: 12.5px;
+    padding: 6px 8px; border: 1px solid var(--paper-line); border-radius: 6px; background: #fff;
+  }
+  .manual-add-row .manual-arrow { color: var(--muted); font-size: 14px; flex-shrink: 0; }
+  .manual-add-row button {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px; text-transform: uppercase;
+    background: var(--gold); color: var(--pitch-dark); border: none; border-radius: 6px; padding: 7px 14px; cursor: pointer;
+  }
+  .manual-add-row button:hover { background: #b6901f; }
   .trade-row-header {
     padding: 8px 16px; border-top: none;
     position: sticky; top: var(--header-h); z-index: 20;
@@ -589,15 +608,20 @@ function sectionKeyOf(baseBucketValue) {
 const SECTION_PRIORITY = {};
 TRADE_SECTIONS.forEach((s, i) => { SECTION_PRIORITY[s.key] = i; });
 
-// Bucket de un sticker a partir de su "key" de display (ej: "ARG 5",
-// "FWC 🌎 3") sin depender de que siga apareciendo en tengo/necesito —
-// funciona igual que la búsqueda de código real en stockRemainingText.
-function bucketOfKey(key) {
+// Código+número reales a partir de una "key" de display (ej: "ARG 5",
+// "FWC 🌎 3") — misma búsqueda que ya usa stockRemainingText para FWC.
+function codeNumFromKey(key) {
   const parts = key.split(' ');
   const num = parseInt(parts[parts.length - 1], 10);
   const label = parts.slice(0, -1).join(' ');
   let code = label;
   for (const c in SEED.fwcLabels) if (SEED.fwcLabels[c] === label) code = c;
+  return { code, num };
+}
+// Bucket de un sticker a partir de su key, sin depender de que siga
+// apareciendo en tengo/necesito.
+function bucketOfKey(key) {
+  const { code, num } = codeNumFromKey(key);
   return baseBucket(code, num);
 }
 // De varios buckets (recibo, doy, extras de cada lado) devuelve la sección
@@ -783,6 +807,7 @@ var extras = {};
 var meetInfo = {};
 var valueOverrides = {};
 var rowOrder = {};
+var manualPairs = {};
 var personOrder = [];
 var sortMode = 'chrono';
 var loaded = false;
@@ -808,7 +833,10 @@ let rowSortableInstances = [];
 var pendingCompletePerson = null;
 
 function getMatches(personName) {
-  if (!_matchCache[personName]) _matchCache[personName] = computePersonMatches(personName);
+  if (!_matchCache[personName]) {
+    const base = computePersonMatches(personName);
+    _matchCache[personName] = { special: base.special, pairs: [...base.pairs, ...buildManualPairs(personName)] };
+  }
   return _matchCache[personName];
 }
 
@@ -910,6 +938,10 @@ async function loadAll() {
     const r = await window.storage.get('panini-tracker-valueoverrides', false);
     if (r && r.value) valueOverrides = JSON.parse(r.value);
   } catch (e) {}
+  try {
+    const r = await window.storage.get('panini-tracker-manualpairs', false);
+    if (r && r.value) manualPairs = JSON.parse(r.value);
+  } catch (e) {}
 
   loaded = true;
   renderAll();
@@ -933,6 +965,7 @@ async function saveTrackingState() {
     await window.storage.set('panini-tracker-valueoverrides', JSON.stringify(valueOverrides), false);
     await window.storage.set('panini-tracker-order', JSON.stringify(personOrder), false);
     await window.storage.set('panini-tracker-roworder', JSON.stringify(rowOrder), false);
+    await window.storage.set('panini-tracker-manualpairs', JSON.stringify(manualPairs), false);
   } catch (e) { console.error('No se pudo guardar el progreso', e); }
 }
 
@@ -1179,6 +1212,7 @@ function acceptCompleteModal() {
 function pairPersonName(pairId) {
   if (pairId.includes('::pair::')) return pairId.split('::pair::')[0];
   if (pairId.includes('::special::')) return pairId.split('::special::')[0];
+  if (pairId.includes('::manual::')) return pairId.split('::manual::')[0];
   return pairId;
 }
 
@@ -1191,6 +1225,21 @@ function personCandidates(personName) {
       if (necesitoHas(code, num)) {
         list.push({ key: stickerDisplay(code, num), label: categoryLabelOf(code, num), base_bucket: baseBucket(code, num), qty: person.have[code][numStr] });
       }
+    }
+  }
+  return list;
+}
+
+// Todo lo que la persona tiene registrado en su base de datos, SIN filtrar
+// por si Daniel lo necesita — para el selector de "agregar otro intercambio
+// a mano", que debe poder usar cualquier cosa de su lista.
+function personAllHaveCandidates(personName) {
+  const person = state.people[personName];
+  const list = [];
+  for (const code in person.have) {
+    for (const numStr in person.have[code]) {
+      const num = parseInt(numStr, 10);
+      list.push({ key: stickerDisplay(code, num), label: categoryLabelOf(code, num), base_bucket: baseBucket(code, num), qty: person.have[code][numStr] });
     }
   }
   return list;
@@ -1213,6 +1262,59 @@ function danielStockList() {
     }
   }
   return list;
+}
+
+// ============================================================================
+// INTERCAMBIOS AGREGADOS A MANO — el emparejamiento automático sólo arma
+// pares 1x1 dentro de un mismo bucket con stock parejo de los dos lados, así
+// que si la base de datos de alguien crece o el balance no da, se quedan
+// afuera. Este mecanismo deja elegir CUALQUIER combinación real (respetando
+// disponibilidad) sin tocar tengo/necesito/have/need.
+// ============================================================================
+function manualPairRecibCandidates(personName) {
+  return personAllHaveCandidates(personName)
+    .filter(c => usedReciboCountForPerson(personName, c.key, '') < c.qty)
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+function manualPairDoyCandidates(personName) {
+  return danielStockList()
+    .filter(c => (c.qty - usedCountFor(c.key, '')) > 0)
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+function buildManualPairs(personName) {
+  const list = manualPairs[personName] || [];
+  return list.map(m => ({
+    id: `${personName}::manual::${m.uid}`,
+    uid: m.uid,
+    isManual: true,
+    recibo_code: m.recibo_code, recibo_num: m.recibo_num,
+    doy_code: m.doy_code, doy_num: m.doy_num,
+    recibo_base_bucket: baseBucket(m.recibo_code, m.recibo_num),
+    doy_base_bucket: baseBucket(m.doy_code, m.doy_num),
+  }));
+}
+function addManualPair(personName, reciboKey, doyKey) {
+  if (!reciboKey || !doyKey) { alert('Elegí un sticker de cada lado'); return; }
+  const r = codeNumFromKey(reciboKey);
+  const d = codeNumFromKey(doyKey);
+  if (!manualPairs[personName]) manualPairs[personName] = [];
+  const uid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  manualPairs[personName].push({ uid, recibo_code: r.code, recibo_num: r.num, doy_code: d.code, doy_num: d.num });
+  saveTrackingState();
+  renderAll();
+}
+function confirmAddManualPair(personName) {
+  const cid = cssId(personName);
+  const reciboSel = document.getElementById(`manualRecibo-${cid}`);
+  const doySel = document.getElementById(`manualDoy-${cid}`);
+  addManualPair(personName, reciboSel.value, doySel.value);
+}
+function removeManualPair(personName, uid) {
+  if (!manualPairs[personName]) return;
+  manualPairs[personName] = manualPairs[personName].filter(m => m.uid !== uid);
+  if (manualPairs[personName].length === 0) delete manualPairs[personName];
+  saveTrackingState();
+  renderAll();
 }
 
 function effectiveRecibo(pair) {
@@ -1327,12 +1429,7 @@ function personReceivedCount(personName, stickerKey) {
 }
 
 function stockRemainingText(stickerKey, usedExcl) {
-  const parts = stickerKey.split(' ');
-  const num = parseInt(parts[parts.length - 1], 10);
-  const code = parts.slice(0, -1).join(' ');
-  // el key usa el nombre de display del FWC; buscamos el codigo real
-  let realCode = code;
-  for (const c in SEED.fwcLabels) if (SEED.fwcLabels[c] === code) realCode = c;
+  const { code: realCode, num } = codeNumFromKey(stickerKey);
   const total = tengoQty(realCode, num) || 1;
   const remaining = total - usedExcl;
   return { total, remaining };
@@ -1607,7 +1704,7 @@ function renderTradeRow(item, isSpecial) {
         <div class="sticker-label">${reciboLabel} ${reciboValueToggle}</div>
         ${reciboSwapHtml}
       </div>
-      <div class="arrow">⇄</div>
+      <div class="arrow">⇄${item.isManual && !isChecked ? `<button type="button" class="remove-manual-btn" title="Quitar este intercambio agregado a mano" onclick="removeManualPair('${pairPersonName(item.id).replace(/'/g, "\\'")}','${item.uid}')">✕</button>` : ''}</div>
       <div class="sticker-block">
         <div class="sticker-code">${doy}</div>
         <div class="sticker-label">${doyLabel} ${doyValueToggle}</div>
@@ -1801,6 +1898,27 @@ function renderTrades() {
         for (const id of orderedIds) html += renderTradeRow(byId[id], false);
         html += `</div>`;
       }
+
+      // Agregar a mano cualquier combinación real de su base de datos, sin
+      // depender de que el emparejamiento automático la haya armado sola
+      // (útil si su base de datos creció o el balance de categorías no dio).
+      const cid = cssId(name);
+      const escName = name.replace(/'/g, "\\'");
+      const manualReciboOpts = manualPairRecibCandidates(name);
+      const manualDoyOpts = manualPairDoyCandidates(name);
+      html += `<div class="section-header">➕ Agregar otro intercambio</div>
+        <div class="manual-add-row">
+          <select id="manualRecibo-${cid}">
+            <option value="">Elegí lo que te da${manualReciboOpts.length ? ` (${manualReciboOpts.length})` : ''}...</option>
+            ${manualReciboOpts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}">${c.key} — ${shortLabel(c.label)}</option>`).join('')}
+          </select>
+          <span class="manual-arrow">⇄</span>
+          <select id="manualDoy-${cid}">
+            <option value="">Elegí lo que le das${manualDoyOpts.length ? ` (${manualDoyOpts.length})` : ''}...</option>
+            ${manualDoyOpts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}">${c.key} — ${shortLabel(c.label)}</option>`).join('')}
+          </select>
+          <button type="button" onclick="confirmAddManualPair('${escName}')">+ Agregar</button>
+        </div>`;
       html += `</div>`;
     }
     html += `</div>`;
