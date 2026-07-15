@@ -784,6 +784,9 @@ async function loadAll() {
 
   if (migrateFwcCategories()) await saveDbState();
 
+  // Las listas de intercambio arrancan colapsadas por defecto en cada carga.
+  collapsedPeople = new Set(Object.keys(state.people));
+
   try {
     const r = await window.storage.get('panini-tracker-checked', false);
     if (r && r.value) checked = new Set(JSON.parse(r.value));
