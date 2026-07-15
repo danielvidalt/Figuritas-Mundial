@@ -1732,28 +1732,31 @@ function buildTradeSummaryText(personName) {
   const meet = meetInfo[personName] || {};
   const meetPlace = meet.place !== undefined ? meet.place : person.meetPoint;
 
-  const lines = [`📦 Intercambio con ${personName}`];
-  const when = [meet.date ? formatDateEs(meet.date) : '', meet.time || ''].filter(Boolean).join(' - ');
-  if (when) lines.push(`📅 ${when}${meetPlace ? ' · ' + meetPlace : ''}`);
-  else if (meetPlace) lines.push(`📍 ${meetPlace}`);
+  const lines = [`Intercambio entre : Daniel y ${personName}`];
+  lines.push(`Fecha: ${meet.date ? formatDateEs(meet.date) : ''}`);
+  lines.push(`Horario: ${meet.time || ''}`);
+  lines.push(`Lugar de encuentro: ${meetPlace || ''}`);
+  lines.push('');
+
   const { reciboCount, doyCount } = countTradeStickers(personName);
-  if (reciboCount !== doyCount) {
-    lines.push(`📊 ${personName} entrega: ${reciboCount} sticker${reciboCount === 1 ? '' : 's'}`);
-    lines.push(`   Daniel entrega: ${doyCount} sticker${doyCount === 1 ? '' : 's'}`);
+  const parejo = reciboCount === doyCount;
+  if (!parejo) {
+    lines.push(`Daniel entrega: ${doyCount} stickers`);
+    lines.push(`${personName} entrega: ${reciboCount} stickers`);
     lines.push('');
   }
 
   let itemCount = 0;
   const pushItem = (recibo, doy, done) => {
     itemCount++;
-    lines.push(`${done ? '✅' : '•'} Te doy ${keyWithPlayerName(doy)} — me das ${keyWithPlayerName(recibo)}`);
+    lines.push(`${done ? '✅ ' : ''}Daniel entrega ${keyWithPlayerName(doy)} y ${personName} entrega ${keyWithPlayerName(recibo)}.`);
   };
   const pushExtra = (key, side) => {
-    lines.push(`   + ${side === 'doy' ? 'también te doy' : 'también me das'} ${keyWithPlayerName(key)}`);
+    lines.push(`   + ${side === 'doy' ? 'Daniel también entrega' : `${personName} también entrega`} ${keyWithPlayerName(key)}.`);
   };
 
   if (special.length) {
-    lines.push('🤝 Trato especial:');
+    lines.push('🤝 Trato Especial en el intercambio:');
     for (const s of special) {
       pushItem(stickerDisplay(s.recibo_code, s.recibo_num), stickerDisplay(s.doy_code, s.doy_num), checked.has(s.id));
     }
@@ -1771,7 +1774,7 @@ function buildTradeSummaryText(personName) {
     const byId = {};
     for (const pr of items) byId[pr.id] = pr;
     const orderedIds = syncSectionOrder(personName, sec.key, items.map(pr => pr.id));
-    lines.push(`${sec.label}:`);
+    lines.push(`${sec.label} en el intercambio:`);
     for (const id of orderedIds) {
       const item = byId[id];
       pushItem(effectiveRecibo(item), effectiveDoy(item), checked.has(item.id));
@@ -1781,7 +1784,9 @@ function buildTradeSummaryText(personName) {
     lines.push('');
   }
 
-  lines.push(`Total: ${itemCount} intercambio${itemCount === 1 ? '' : 's'}`);
+  if (parejo) {
+    lines.push(`Total de intercambio: ${itemCount}`);
+  }
   return lines.join('\n').trim();
 }
 function exportTradeSummary(personName) {
