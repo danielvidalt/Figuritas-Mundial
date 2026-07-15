@@ -2320,29 +2320,71 @@ function buildTengoSubtotalHtml() {
   const filteredCopies = filtered.reduce((a, r) => a + r.qty, 0);
   return `<div class="db-subtotal">Mostrando <b>${filtered.length}</b> de <b>${all.length}</b> stickers únicos (<b>${filteredCopies}</b> copias) — de un total de <b>${totalCopies}</b> copias disponibles${outPart}</div>`;
 }
+// Opciones de orden para el resumen de texto de Tengo — combina "con o sin
+// categorías" con "alfabético / cantidad mayor a menor / cantidad menor a
+// mayor".
+const TENGO_SUMMARY_SORT_OPTIONS = [
+  { value: 'categoria', label: 'Por categoría (A-Z)' },
+  { value: 'categoria_cant_desc', label: 'Por categoría, cantidad: mayor a menor' },
+  { value: 'categoria_cant_asc', label: 'Por categoría, cantidad: menor a mayor' },
+  { value: 'pais', label: 'Sin categorías, por país (A-Z)' },
+  { value: 'cant_desc', label: 'Sin categorías, cantidad: mayor a menor' },
+  { value: 'cant_asc', label: 'Sin categorías, cantidad: menor a mayor' },
+];
+let tengoSummarySortMode = 'categoria';
+function tengoSummarySortOptionsHtml() {
+  return TENGO_SUMMARY_SORT_OPTIONS.map(o =>
+    `<option value="${o.value}" ${o.value === tengoSummarySortMode ? 'selected' : ''}>${o.label}</option>`
+  ).join('');
+}
+function onTengoSummarySortChange(selectEl) {
+  tengoSummarySortMode = selectEl.value;
+}
 // Texto para copiar y compartir: todo lo que sigue disponible para
-// intercambiar (stock > 0), agrupado por categoría y con la cantidad
-// actual de cada sticker.
-function buildTengoSummaryText() {
+// intercambiar (stock > 0), con la cantidad actual de cada sticker, en el
+// orden elegido por el usuario (con/sin categorías, alfabético o por
+// cantidad).
+function buildTengoSummaryText(sortMode) {
+  sortMode = sortMode || tengoSummarySortMode;
   const { all } = tengoFilteredRows();
   const available = all.filter(r => r.qty > 0);
-  const bySection = {};
-  for (const r of available) {
-    const secKey = sectionKeyOf(bucketOfKey(stickerDisplay(r.code, r.num)));
-    (bySection[secKey] = bySection[secKey] || []).push(r);
-  }
+  const byPais = (a, b) => (a.code + a.num).localeCompare(b.code + b.num);
+  const byQtyDesc = (a, b) => b.qty - a.qty || byPais(a, b);
+  const byQtyAsc = (a, b) => a.qty - b.qty || byPais(a, b);
+  const itemLine = r => `${keyWithPlayerName(stickerDisplay(r.code, r.num))} x${r.qty}`;
+
   const lines = ['📦 Tengo disponible para intercambiar:', ''];
   let totalCopies = 0;
-  for (const sec of TRADE_SECTIONS) {
-    const items = bySection[sec.key];
-    if (!items || !items.length) continue;
-    lines.push(`${sec.label}:`);
+  const useCategories = sortMode === 'categoria' || sortMode === 'categoria_cant_desc' || sortMode === 'categoria_cant_asc';
+
+  if (useCategories) {
+    const bySection = {};
+    for (const r of available) {
+      const secKey = sectionKeyOf(bucketOfKey(stickerDisplay(r.code, r.num)));
+      (bySection[secKey] = bySection[secKey] || []).push(r);
+    }
+    const sorter = sortMode === 'categoria_cant_desc' ? byQtyDesc : sortMode === 'categoria_cant_asc' ? byQtyAsc : byPais;
+    for (const sec of TRADE_SECTIONS) {
+      const items = bySection[sec.key];
+      if (!items || !items.length) continue;
+      items.sort(sorter);
+      lines.push(`${sec.label}:`);
+      for (const r of items) {
+        totalCopies += r.qty;
+        lines.push(itemLine(r));
+      }
+      lines.push('');
+    }
+  } else {
+    const sorter = sortMode === 'cant_desc' ? byQtyDesc : sortMode === 'cant_asc' ? byQtyAsc : byPais;
+    const items = [...available].sort(sorter);
     for (const r of items) {
       totalCopies += r.qty;
-      lines.push(`${keyWithPlayerName(stickerDisplay(r.code, r.num))} x${r.qty}`);
+      lines.push(itemLine(r));
     }
     lines.push('');
   }
+
   lines.push(`Total: ${available.length} stickers únicos, ${totalCopies} copias disponibles`);
   return lines.join('\n').trim();
 }
@@ -2556,7 +2598,10 @@ function renderDbInventario() {
     <div class="db-section">
       <div class="db-section-title-row">
         <h2>Tengo para intercambiar <span style="color:var(--muted);font-size:13px">(${tengoCount})</span></h2>
-        <button type="button" class="db-export-btn" title="Copiar en texto todo lo que tenés disponible para intercambiar, con la cantidad de cada sticker" onclick="exportTengoSummary()">📋 Copiar resumen</button>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <select class="db-filter-select" title="Orden del resumen a copiar" onchange="onTengoSummarySortChange(this)">${tengoSummarySortOptionsHtml()}</select>
+          <button type="button" class="db-export-btn" title="Copiar en texto todo lo que tenés disponible para intercambiar, con la cantidad de cada sticker" onclick="exportTengoSummary()">📋 Copiar resumen</button>
+        </div>
       </div>
       <p class="db-sub">Stickers que tienes disponibles para dar. Elegí el equipo y tocá los números que tenés — tocá de nuevo para quitarlos.</p>
       <div class="team-picker">
