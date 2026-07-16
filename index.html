@@ -664,6 +664,21 @@ function stickerDisplay(code, num) {
   return `${displayTeam(code)} ${numText}`;
 }
 
+// Orden "alfabético" usado en todas las listas de stickers: primero por
+// equipo/etiqueta mostrada (A-Z), y DENTRO del mismo equipo por número
+// ascendente — comparar el número como texto pondría "10" antes que "2",
+// así que se compara como entero para que el menor quede siempre arriba.
+function compareCodeNum(codeA, numA, codeB, numB) {
+  const c = displayTeam(codeA).localeCompare(displayTeam(codeB), 'es');
+  if (c !== 0) return c;
+  return numA - numB;
+}
+function compareStickerKeys(keyA, keyB) {
+  const a = codeNumFromKey(keyA);
+  const b = codeNumFromKey(keyB);
+  return compareCodeNum(a.code, a.num, b.code, b.num);
+}
+
 function bucketKey(code, num) {
   const premium = premiumOf(code, num);
   if (premium) return 'Premium';
@@ -931,7 +946,7 @@ function personHaveItems(personName, listId) {
       (necesitoHas(code, num) ? useful : filler).push(item);
     }
   }
-  const sortFn = (a, b) => a.key.localeCompare(b.key);
+  const sortFn = (a, b) => compareCodeNum(a.code, a.num, b.code, b.num);
   useful.sort(sortFn); filler.sort(sortFn);
   return { useful, filler };
 }
@@ -955,7 +970,7 @@ function personGiveItems(personName, listId) {
       (personNeedsThis(personName, code, num) ? useful : filler).push(item);
     }
   }
-  const sortFn = (a, b) => a.key.localeCompare(b.key);
+  const sortFn = (a, b) => compareCodeNum(a.code, a.num, b.code, b.num);
   useful.sort(sortFn); filler.sort(sortFn);
   return { useful, filler };
 }
@@ -1015,7 +1030,7 @@ function computeSaleMatches(buyer) {
       if (qty > 0) matches.push({ code, num, qty });
     }
   }
-  matches.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+  matches.sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
   return matches;
 }
 
@@ -1580,7 +1595,7 @@ function computeStockConflicts() {
       conflicts.push({ key, total, used: usage[key].count, people: [...usage[key].people], occurrences: usage[key].occurrences });
     }
   }
-  conflicts.sort((a, b) => a.key.localeCompare(b.key));
+  conflicts.sort((a, b) => compareStickerKeys(a.key, b.key));
   return conflicts;
 }
 // Abre/cierra el panel de detalle debajo de las pestañas de estado — hace
@@ -1598,7 +1613,7 @@ function scrollToCompleted() {
 // punta con ◀ ▶ en vez de quedar encerrado dentro de un solo sticker.
 function buildFlatOccurrences(byKey) {
   const flat = [];
-  for (const key of Object.keys(byKey).sort()) {
+  for (const key of Object.keys(byKey).sort(compareStickerKeys)) {
     for (const occ of byKey[key]) flat.push({ key, personName: occ.personName, pairId: occ.pairId });
   }
   return flat;
@@ -1967,10 +1982,10 @@ function specialDealHaveOptionsHtml(personName, selectedKey) {
   for (const code in person.have) {
     for (const numStr in person.have[code]) {
       const num = parseInt(numStr, 10);
-      opts.push({ key: stickerDisplay(code, num), label: categoryLabelOf(code, num) });
+      opts.push({ code, num, key: stickerDisplay(code, num), label: categoryLabelOf(code, num) });
     }
   }
-  opts.sort((a, b) => a.key.localeCompare(b.key));
+  opts.sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
   return opts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}" ${c.key === selectedKey ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`).join('');
 }
 function specialDealGiveOptionsHtml(selectedKey) {
@@ -1978,10 +1993,10 @@ function specialDealGiveOptionsHtml(selectedKey) {
   for (const code in state.tengo) {
     for (const numStr in state.tengo[code]) {
       const num = parseInt(numStr, 10);
-      if (state.tengo[code][numStr] > 0) opts.push({ key: stickerDisplay(code, num), label: categoryLabelOf(code, num) });
+      if (state.tengo[code][numStr] > 0) opts.push({ code, num, key: stickerDisplay(code, num), label: categoryLabelOf(code, num) });
     }
   }
-  opts.sort((a, b) => a.key.localeCompare(b.key));
+  opts.sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
   return opts.map(c => `<option value="${c.key.replace(/"/g, '&quot;')}" ${c.key === selectedKey ? 'selected' : ''}>${c.key} — ${shortLabel(c.label)}</option>`).join('');
 }
 function saveSpecialDeal(personName) {
@@ -2087,7 +2102,7 @@ function renderTrades() {
 
   const blockedOcc = computeBlockedOccurrences();
   _blockedOccByKey = blockedOcc;
-  const blockedKeys = Object.keys(blockedOcc).sort();
+  const blockedKeys = Object.keys(blockedOcc).sort(compareStickerKeys);
   const stockConflicts = computeStockConflicts();
   _conflictOccByKey = {};
   for (const c of stockConflicts) _conflictOccByKey[c.key] = c.occurrences;
@@ -2252,7 +2267,7 @@ function tengoFilteredRows() {
       all.push({ code, num, rawQty, given, qty: Math.max(0, rawQty - given) });
     }
   }
-  all.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+  all.sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
   const filtered = all.filter(r => {
     if (tengoCountryFilter && r.code !== tengoCountryFilter) return false;
     if (tengoTypeFilter && stickerTypeOf(r.code, r.num) !== tengoTypeFilter) return false;
@@ -2330,7 +2345,7 @@ function buildTengoSummaryText(sortMode) {
   sortMode = sortMode || tengoSummarySortMode;
   const { all } = tengoFilteredRows();
   const available = all.filter(r => r.qty > 0);
-  const byPais = (a, b) => (a.code + a.num).localeCompare(b.code + b.num);
+  const byPais = (a, b) => compareCodeNum(a.code, a.num, b.code, b.num);
   const byQtyDesc = (a, b) => b.qty - a.qty || byPais(a, b);
   const byQtyAsc = (a, b) => a.qty - b.qty || byPais(a, b);
   const itemLine = r => `${keyWithPlayerName(stickerDisplay(r.code, r.num))} x${r.qty}`;
@@ -2384,7 +2399,7 @@ function exportTengoSummary() {
 function necesitoFilteredRows() {
   const all = [];
   for (const code in state.necesito) for (const num of state.necesito[code]) all.push({ code, num });
-  all.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+  all.sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
   const filtered = all.filter(r => {
     if (necesitoCountryFilter && r.code !== necesitoCountryFilter) return false;
     if (necesitoTypeFilter && stickerTypeOf(r.code, r.num) !== necesitoTypeFilter) return false;
@@ -2723,10 +2738,10 @@ function renderDbPersonas() {
 
     let haveRows = [];
     for (const code in p.have) for (const numStr in p.have[code]) haveRows.push({ code, num: parseInt(numStr, 10), qty: p.have[code][numStr] });
-    haveRows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+    haveRows.sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
     let needRows = [];
     for (const code in p.need) for (const num of p.need[code]) needRows.push({ code, num });
-    needRows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+    needRows.sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
 
     html += `<div class="person-manage-card" id="person-manage-${cid}">
       <div class="person-manage-head">
@@ -2862,7 +2877,7 @@ function renderDbVentas() {
     const buyerKey = `Venta::${sale.buyer}`;
     let needRows = [];
     for (const code in sale.need) for (const num of sale.need[code]) needRows.push({ code, num });
-    needRows.sort((a, b) => (a.code + a.num).localeCompare(b.code + b.num));
+    needRows.sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
     const matches = computeSaleMatches(sale.buyer);
     const doneCount = matches.filter(item => checked.has(`${sale.buyer}::sale::${stickerDisplay(item.code, item.num)}`)).length;
 
