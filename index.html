@@ -522,6 +522,7 @@
   .item-row { display: grid; grid-template-columns: 18px 1fr; align-items: start; gap: 8px; padding: 6px 2px; border-bottom: 1px solid var(--paper-line); }
   .item-row:last-child { border-bottom: none; }
   .item-row.done .sticker-code { text-decoration: line-through; color: var(--muted); }
+  .item-row.selected { background: var(--gold-soft); border-radius: 6px; }
   .item-row.blocked { opacity: 0.55; }
   .item-qty { font-size: 12px; color: var(--muted); font-weight: 600; }
   .filler-toggle {
@@ -846,6 +847,31 @@ function personSpecialDeal(personName) {
     doy_code: sd.doy_code, doy_num: sd.doy_num,
   };
 }
+// De todo lo que tiene la persona (útil + relleno), sólo lo que se marcó
+// como parte del "Intercambio programado" — la lista preliminar es sólo
+// para elegir, esto es lo que realmente se va a intercambiar.
+function personSelectedHaveItems(personName) {
+  const { useful, filler } = personHaveItems(personName);
+  return [...useful, ...filler].filter(it => selected.has(it.id));
+}
+function personSelectedGiveItems(personName) {
+  const { useful, filler } = personGiveItems(personName);
+  return [...useful, ...filler].filter(it => selected.has(it.id));
+}
+// Marca/desmarca un sticker como parte del intercambio que se va a hacer
+// (lista preliminar). Al sacarlo de la selección también se saca la
+// confirmación, si la tenía — no tiene sentido "confirmado" algo que ya no
+// está en el trato.
+function toggleSelected(id) {
+  if (selected.has(id)) {
+    selected.delete(id);
+    checked.delete(id);
+  } else {
+    selected.add(id);
+  }
+  saveTrackingState();
+  renderAll();
+}
 
 function computeSaleMatches(buyer) {
   const sale = state.sales.find(s => s.buyer === buyer);
@@ -868,6 +894,12 @@ function computeSaleMatches(buyer) {
 // ESTADO
 // ============================================================================
 var state = { tengo: {}, necesito: {}, people: {}, sales: [], premium: {} };
+// Dos etapas: `selected` es la lista PRELIMINAR (qué sticker se suma al
+// intercambio que se va a hacer, elegido de todo lo útil/relleno de cada
+// persona); `checked` ahora es la confirmación real dentro del "Intercambio
+// programado" (sólo lo seleccionado) — es lo único que descuenta stock de
+// verdad.
+var selected = new Set();
 var checked = new Set();
 var meetInfo = {};
 var valueOverrides = {};
@@ -989,6 +1021,10 @@ async function loadAll() {
   collapsedPeople = new Set(Object.keys(state.people));
 
   try {
+    const r = await window.storage.get('panini-tracker-selected', false);
+    if (r && r.value) selected = new Set(JSON.parse(r.value));
+  } catch (e) {}
+  try {
     const r = await window.storage.get('panini-tracker-checked', false);
     if (r && r.value) checked = new Set(JSON.parse(r.value));
   } catch (e) {}
@@ -1019,6 +1055,7 @@ async function saveDbState() {
 
 async function saveTrackingState() {
   try {
+    await window.storage.set('panini-tracker-selected', JSON.stringify([...selected]), false);
     await window.storage.set('panini-tracker-checked', JSON.stringify([...checked]), false);
     await window.storage.set('panini-tracker-meet', JSON.stringify(meetInfo), false);
     await window.storage.set('panini-tracker-valueoverrides', JSON.stringify(valueOverrides), false);
@@ -1030,23 +1067,27 @@ async function saveTrackingState() {
 // ORDEN DE PERSONAS — cronológico por reunión, con filtros alternativos y
 // reordenamiento manual (drag & drop) persistido en `personOrder`.
 // ============================================================================
-// Cuenta lo útil de cada lado (lo que me sirve de lo que tiene, lo que le
-// sirve de lo que tengo) más el Trato Especial — la base para el progreso
-// y para decidir si una persona sigue "en curso" o ya está "completada".
+// Cuenta lo SELECCIONADO de cada lado (el "Intercambio programado", no todo
+// lo útil disponible) más el Trato Especial — la base para el progreso y
+// para decidir si una persona sigue "en curso" o ya está "completada".
 function personTradeTotals(name) {
-  const { useful: haveUseful } = personHaveItems(name);
-  const { useful: giveUseful } = personGiveItems(name);
+  const haveSel = personSelectedHaveItems(name);
+  const giveSel = personSelectedGiveItems(name);
   const special = personSpecialDeal(name);
-  const total = haveUseful.length + giveUseful.length + (special ? 1 : 0);
-  const done = haveUseful.filter(it => checked.has(it.id)).length
-    + giveUseful.filter(it => checked.has(it.id)).length
+  const total = haveSel.length + giveSel.length + (special ? 1 : 0);
+  const done = haveSel.filter(it => checked.has(it.id)).length
+    + giveSel.filter(it => checked.has(it.id)).length
     + (special && checked.has(special.id) ? 1 : 0);
   return { total, done };
 }
+// Elegible para aparecer en Intercambios: tiene ALGO útil disponible para
+// elegir (aunque todavía no haya seleccionado nada), un Trato Especial, o
+// un aviso/conflicto puntual.
 function eligiblePeopleNames() {
   return Object.keys(state.people).filter(name => {
-    const { total } = personTradeTotals(name);
-    return total > 0 || !!state.people[name].conflicto;
+    const { useful: haveUseful } = personHaveItems(name);
+    const { useful: giveUseful } = personGiveItems(name);
+    return haveUseful.length > 0 || giveUseful.length > 0 || !!personSpecialDeal(name) || !!state.people[name].conflicto;
   });
 }
 
@@ -1294,8 +1335,7 @@ function stockRemainingText(stickerKey, usedExcl) {
 function computeBlockedOccurrences() {
   const byKey = {};
   for (const name of Object.keys(state.people)) {
-    const { useful, filler } = personGiveItems(name);
-    for (const item of [...useful, ...filler]) {
+    for (const item of personSelectedGiveItems(name)) {
       if (checked.has(item.id)) continue;
       const used = usedCountFor(item.key, item.id);
       const { remaining } = stockRemainingText(item.key, used);
@@ -1313,8 +1353,7 @@ function computeBlockedOccurrences() {
 function computeStockConflicts() {
   const usage = {};
   for (const name of Object.keys(state.people)) {
-    const { useful, filler } = personGiveItems(name);
-    for (const item of [...useful, ...filler]) {
+    for (const item of personSelectedGiveItems(name)) {
       if (!checked.has(item.id)) continue;
       if (!usage[item.key]) usage[item.key] = { count: 0, people: new Set(), occurrences: [] };
       usage[item.key].count++;
@@ -1507,11 +1546,11 @@ function keyWithPlayerName(key) {
 // Cuenta los stickers de cada lado — por cantidad, así que el total de un
 // lado puede no coincidir con el del otro.
 function countTradeStickers(personName) {
-  const { useful: haveUseful } = personHaveItems(personName);
-  const { useful: giveUseful } = personGiveItems(personName);
+  const haveSel = personSelectedHaveItems(personName);
+  const giveSel = personSelectedGiveItems(personName);
   const special = personSpecialDeal(personName);
-  const reciboCount = haveUseful.length + (special ? 1 : 0);
-  const doyCount = giveUseful.length + (special ? 1 : 0);
+  const reciboCount = haveSel.length + (special ? 1 : 0);
+  const doyCount = giveSel.length + (special ? 1 : 0);
   return { reciboCount, doyCount };
 }
 // Texto simple para copiar y mandar por mensaje: dos listas planas (sin
@@ -1522,15 +1561,15 @@ function buildTradeSummaryText(personName) {
   const meet = meetInfo[personName] || {};
   const meetPlace = meet.place !== undefined ? meet.place : person.meetPoint;
   const special = personSpecialDeal(personName);
-  const { useful: haveUseful } = personHaveItems(personName);
-  const { useful: giveUseful } = personGiveItems(personName);
+  const haveSel = personSelectedHaveItems(personName);
+  const giveSel = personSelectedGiveItems(personName);
 
   const haveList = special
-    ? [...haveUseful, { id: special.id, key: stickerDisplay(special.recibo_code, special.recibo_num), qty: 1 }]
-    : haveUseful;
+    ? [...haveSel, { id: special.id, key: stickerDisplay(special.recibo_code, special.recibo_num), qty: 1 }]
+    : haveSel;
   const giveList = special
-    ? [...giveUseful, { id: special.id, key: stickerDisplay(special.doy_code, special.doy_num), qty: 1 }]
-    : giveUseful;
+    ? [...giveSel, { id: special.id, key: stickerDisplay(special.doy_code, special.doy_num), qty: 1 }]
+    : giveSel;
 
   const lines = [`Intercambio entre : Dani y ${firstName}`];
   lines.push(`Fecha: ${meet.date ? formatDateEs(meet.date) : ''}`);
@@ -1580,7 +1619,12 @@ function toggleValueOverride(itemId) {
 // yo), cada una con lo útil arriba y lo demás (relleno) colapsado abajo.
 // Sólo el Trato Especial sigue siendo un 1x1 fijo.
 // ============================================================================
-function renderItemRow(item, side, personName) {
+// mode: 'select' (lista preliminar — el checkbox suma/saca del intercambio
+// programado, no toca stock) o 'confirm' (lista de intercambio programado —
+// el checkbox confirma que se entregó/recibió de verdad, y ESO es lo único
+// que descuenta stock).
+function renderItemRow(item, side, personName, mode) {
+  const isSelected = selected.has(item.id);
   const isChecked = checked.has(item.id);
   const label = categoryLabelOf(item.code, item.num);
   const isPremium = isPremiumLabel(label);
@@ -1597,34 +1641,60 @@ function renderItemRow(item, side, personName) {
   if (side === 'give' && !isChecked) {
     const used = usedCountFor(item.key, item.id);
     const { remaining } = stockRemainingText(item.key, used);
-    blocked = remaining <= 0;
+    blocked = mode === 'confirm' && remaining <= 0;
     stockNote = giveStockNoteHtml(item, personName);
     conflictClass = giveConflictInfo(item.key) ? 'conflict' : '';
   }
 
   const qtyText = item.qty > 1 ? ` <span class="item-qty">x${item.qty}</span>` : '';
+  const isConfirm = mode === 'confirm';
+  const boxOn = isConfirm ? isChecked : isSelected;
+  const onToggle = isConfirm ? `toggle('${escId}')` : `toggleSelected('${escId}')`;
+  const rowStateClass = isConfirm ? (isChecked ? 'done' : '') : (isSelected ? 'selected' : '');
+  const rowIdAttr = isConfirm ? ` data-row-id="${item.id.replace(/"/g, '&quot;')}"` : '';
 
-  return `<div class="item-row ${isChecked ? 'done' : ''} ${blocked ? 'blocked' : ''}" data-row-id="${item.id.replace(/"/g, '&quot;')}">
-      <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${item.id.replace(/'/g, "\\'")}')" />
+  return `<div class="item-row ${rowStateClass} ${blocked ? 'blocked' : ''}"${rowIdAttr}>
+      <input type="checkbox" ${boxOn ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="${onToggle}" />
       <div class="sticker-block">
         <div class="sticker-code ${conflictClass}">${item.key}${qtyText}${stockNote}</div>
         <div class="sticker-label">${displayLabel} ${valueToggle}</div>
       </div>
     </div>`;
 }
-// Una sección de la lista (útil o relleno) para un lado (have/give) de una
-// persona. La de relleno arranca colapsada — puede ser mucho stock — y se
-// expande con un clic; la útil siempre está abierta.
+// Una sección de la lista PRELIMINAR (útil o relleno) para un lado
+// (have/give) de una persona. La de relleno arranca colapsada — puede ser
+// mucho stock — y se expande con un clic; la útil siempre está abierta.
 function renderItemSection(personName, side, items, sectionLabel, isFiller) {
   if (!items.length) return '';
   if (!isFiller) {
     return `<div class="item-section-header">${sectionLabel} (${items.length})</div>
-      <div class="item-list">${items.map(it => renderItemRow(it, side, personName)).join('')}</div>`;
+      <div class="item-list">${items.map(it => renderItemRow(it, side, personName, 'select')).join('')}</div>`;
   }
   const expanded = expandedFiller.has(`${personName}::${side}`);
   const escName = personName.replace(/'/g, "\\'");
   return `<button type="button" class="filler-toggle" onclick="toggleFillerExpand('${escName}','${side}')">${expanded ? '▾' : '▸'} ${sectionLabel} (${items.length})</button>
-    ${expanded ? `<div class="item-list">${items.map(it => renderItemRow(it, side, personName)).join('')}</div>` : ''}`;
+    ${expanded ? `<div class="item-list">${items.map(it => renderItemRow(it, side, personName, 'select')).join('')}</div>` : ''}`;
+}
+// La lista del "Intercambio programado": sólo lo que se seleccionó de las
+// listas preliminares de abajo, con su propio checkbox de CONFIRMACIÓN —
+// éste es el que realmente descuenta stock cuando se marca.
+function renderProgrammedSection(personName) {
+  const haveSel = personSelectedHaveItems(personName);
+  const giveSel = personSelectedGiveItems(personName);
+  let html = `<div class="section-header">📋 Intercambio programado — confirmá lo que realmente se entregó/recibió</div>`;
+  if (!haveSel.length && !giveSel.length) {
+    html += `<p class="status-panel-empty" style="padding:0 16px 12px">Todavía no seleccionaste nada de las listas de abajo.</p>`;
+    return html;
+  }
+  html += `<div class="two-col-trade">
+      <div class="trade-col">
+        <div class="item-list">${haveSel.map(it => renderItemRow(it, 'have', personName, 'confirm')).join('') || '<p class="status-panel-empty">Nada de este lado todavía.</p>'}</div>
+      </div>
+      <div class="trade-col">
+        <div class="item-list">${giveSel.map(it => renderItemRow(it, 'give', personName, 'confirm')).join('') || '<p class="status-panel-empty">Nada de este lado todavía.</p>'}</div>
+      </div>
+    </div>`;
+  return html;
 }
 // El Trato Especial sigue siendo el único caso 1x1 fijo — una sola fila con
 // ambos lados, sin selector de cambio (se define en Base de Datos).
@@ -1850,6 +1920,7 @@ function renderTrades() {
       }
       html += renderSpecialDealSection(special, name);
 
+      html += `<div class="section-header">🗂️ Lista preliminar — elegí qué sumar al intercambio</div>`;
       html += `<div class="two-col-trade">
         <div class="trade-col">
           <h4 class="trade-col-title">📥 Recibís (tiene ${name.split(' ')[0]})</h4>
@@ -1862,6 +1933,8 @@ function renderTrades() {
           ${renderItemSection(name, 'give', giveItems.filler, '🟣 Lo que no le sirve', true)}
         </div>
       </div>`;
+
+      html += renderProgrammedSection(name);
       html += `</div>`;
     }
     html += `</div>`;
@@ -1880,7 +1953,7 @@ function renderTrades() {
   }
 
   document.getElementById('page-trades').innerHTML = statusTabsHtml + statusPanelHtml + sortBarHtml + groupsHtml;
-  document.getElementById('footerText').innerHTML = 'Marca cada sticker como hecho apenas lo entregues o lo recibas. El trato es por cantidad de cada lado, no importa cuál se cruza con cuál — sólo el Trato Especial es un 1x1 fijo. Si el mismo sticker tuyo ya se entregó en otro trato, se avisa en la fila. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
+  document.getElementById('footerText').innerHTML = 'Elegí en la lista preliminar qué sumar al intercambio (no descuenta nada todavía) — aparece abajo, en "Intercambio programado", donde recién ahí marcás lo que realmente se entregó/recibió, y eso es lo que descuenta stock de verdad. El trato es por cantidad de cada lado, no importa cuál se cruza con cuál — sólo el Trato Especial es un 1x1 fijo. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
   initPeopleSortable();
   updateHeaderHeightVar();
 }
@@ -2303,6 +2376,7 @@ function removePerson(name) {
   delete state.people[name];
   delete meetInfo[name];
   [...checked].forEach(id => { if (id.startsWith(name + '::')) checked.delete(id); });
+  [...selected].forEach(id => { if (id.startsWith(name + '::')) selected.delete(id); });
   Object.keys(valueOverrides).forEach(id => { if (id.startsWith(name + '::')) delete valueOverrides[id]; });
   if (openPersonName === name) openPersonName = null;
   saveDbState();
@@ -2566,7 +2640,8 @@ function renderDbVentas() {
 // INIT
 // ============================================================================
 document.getElementById('resetBtn').addEventListener('click', async () => {
-  if (confirm('¿Reiniciar todo el progreso de intercambios? Esto desmarca todo, deshace los ajustes de valor y borra fecha/lugar/hora. NO borra tu base de datos (Tengo/Necesito/Personas).')) {
+  if (confirm('¿Reiniciar todo el progreso de intercambios? Esto vacía lo seleccionado/confirmado de cada persona, deshace los ajustes de valor y borra fecha/lugar/hora. NO borra tu base de datos (Tengo/Necesito/Personas).')) {
+    selected = new Set();
     checked = new Set();
     valueOverrides = {};
     meetInfo = {};
