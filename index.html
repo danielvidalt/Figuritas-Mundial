@@ -385,10 +385,6 @@
   .stock-note.blocked-text { color: var(--red); font-weight: 600; }
   .stock-note.low-text { color: var(--gold); font-weight: 600; }
 
-  .sale-row { grid-template-columns: 26px 1fr auto; }
-  .price-tag { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; background: var(--pitch); color: var(--paper); white-space: nowrap; }
-  .price-tag.low { background: #8a8570; }
-
   footer { max-width: 920px; margin: 10px auto 0; padding: 0 16px; color: var(--muted); font-size: 12px; font-family: 'Barlow Condensed', sans-serif; }
 
   /* ---- Base de Datos ---- */
@@ -577,7 +573,6 @@
   <div class="tabs">
     <button class="tab-btn active" id="tabTradesBtn" onclick="switchTab('trades')">Intercambios</button>
     <button class="tab-btn" id="tabDbBtn" onclick="switchTab('db')">Base de Datos</button>
-    <button class="tab-btn" id="tabVentasBtn" onclick="switchTab('ventas')">Ventas</button>
   </div>
   <div class="summary-bar" id="summaryBar"></div>
 </header>
@@ -595,9 +590,6 @@
     </div>
     <div id="db-inventario" class="db-sub-page"></div>
     <div id="db-personas" class="db-sub-page" style="display:none"></div>
-  </div>
-  <div class="page" id="page-ventas">
-    <div id="db-ventas"></div>
   </div>
 </main>
 
@@ -1040,27 +1032,13 @@ function toggleAllSelected(ids, on) {
   renderAll();
 }
 
-function computeSaleMatches(buyer) {
-  const sale = state.sales.find(s => s.buyer === buyer);
-  if (!sale) return [];
-  const matches = [];
-  for (const code in sale.need) {
-    for (const num of sale.need[code]) {
-      const qty = tengoQty(code, num);
-      if (qty > 0) matches.push({ code, num, qty });
-    }
-  }
-  matches.sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
-  return matches;
-}
-
 
 </script>
 <script>
 // ============================================================================
 // ESTADO
 // ============================================================================
-var state = { tengo: {}, necesito: {}, people: {}, sales: [], premium: {}, receivedMigrated: false };
+var state = { tengo: {}, necesito: {}, people: {}, premium: {}, receivedMigrated: false };
 // Dos etapas: `selected` es la lista PRELIMINAR (qué sticker se suma al
 // intercambio que se va a hacer, elegido de todo lo útil/relleno de cada
 // persona); `checked` ahora es la confirmación real dentro del "Intercambio
@@ -1088,7 +1066,6 @@ var pickerTengo = '';
 var pickerNecesito = '';
 var pickerPersonHave = {};
 var pickerPersonNeed = {};
-var pickerSaleNeed = {};
 let personSortableInstances = [];
 var pendingCompletePerson = null;
 // Secciones "no útil / relleno" expandidas por el usuario (colapsadas por
@@ -1125,13 +1102,13 @@ var activeNav = null;
 var activeListByPerson = {};
 
 // Devuelve el nombre de la persona a partir de un id de item (have/give/
-// special/sale) — el nombre es siempre el primer segmento separado por "::".
+// special) — el nombre es siempre el primer segmento separado por "::".
 function itemPersonName(id) {
   return id.split('::')[0];
 }
 // Id de la lista de intercambio a la que pertenece un id de item have/give
 // (formato `${personName}::${listId}::have|give::...`) — null para ids sin
-// lista (Trato Especial o ventas).
+// lista (Trato Especial).
 function itemListIdFromId(id) {
   const parts = id.split('::');
   return (parts.length === 4 && (parts[2] === 'have' || parts[2] === 'give')) ? parts[1] : null;
@@ -1169,7 +1146,6 @@ function migrateFwcCategories() {
     mergeQtyMap(state.people[name].have);
     mergeArray(state.people[name].need);
   }
-  for (const sale of state.sales) mergeArray(sale.need);
   return changed;
 }
 
@@ -1243,7 +1219,6 @@ async function loadAll() {
       state.tengo = saved.tengo || {};
       state.necesito = saved.necesito || {};
       state.people = saved.people || {};
-      state.sales = saved.sales || [];
       state.premium = saved.premium || JSON.parse(JSON.stringify(SEED.premium));
       state.receivedMigrated = saved.receivedMigrated || false;
     } else {
@@ -1253,7 +1228,6 @@ async function loadAll() {
     state.tengo = JSON.parse(JSON.stringify(SEED.tengo));
     state.necesito = JSON.parse(JSON.stringify(SEED.necesito));
     state.people = JSON.parse(JSON.stringify(SEED.people));
-    state.sales = JSON.parse(JSON.stringify(SEED.sales));
     state.premium = JSON.parse(JSON.stringify(SEED.premium));
     state.receivedMigrated = false;
     await saveDbState();
@@ -1308,7 +1282,7 @@ async function loadAll() {
 async function saveDbState() {
   try {
     await window.storage.set('panini-db-state', JSON.stringify({
-      tengo: state.tengo, necesito: state.necesito, people: state.people, sales: state.sales, premium: state.premium,
+      tengo: state.tengo, necesito: state.necesito, people: state.people, premium: state.premium,
       receivedMigrated: state.receivedMigrated,
     }), false);
   } catch (e) { console.error('No se pudo guardar la base de datos', e); }
@@ -1488,7 +1462,6 @@ function renderAll() {
   renderTrades();
   renderDbInventario();
   renderDbPersonas();
-  renderDbVentas();
   renderNavFloater();
 
   window.scrollTo(0, winY);
@@ -1505,10 +1478,8 @@ function switchTab(tab) {
   currentTab = tab;
   document.getElementById('page-trades').classList.toggle('active', tab === 'trades');
   document.getElementById('page-db').classList.toggle('active', tab === 'db');
-  document.getElementById('page-ventas').classList.toggle('active', tab === 'ventas');
   document.getElementById('tabTradesBtn').classList.toggle('active', tab === 'trades');
   document.getElementById('tabDbBtn').classList.toggle('active', tab === 'db');
-  document.getElementById('tabVentasBtn').classList.toggle('active', tab === 'ventas');
   document.getElementById('summaryBar').style.display = tab === 'trades' ? 'flex' : 'none';
   document.getElementById('footerText').style.display = tab === 'trades' ? 'block' : 'none';
   updateHeaderHeightVar();
@@ -1541,7 +1512,7 @@ function adjustTengoQty(code, num, delta) {
 // acaba de confirmar como recibido — el lado "recibo" de un have normal, o
 // el lado "recibo" del Trato Especial (que no queda codificado en su id,
 // hay que buscarlo en specialDeal). null si el id no representa un recibo
-// (lado "doy", ventas).
+// (lado "doy").
 function receivedStickerFromId(id) {
   const parts = id.split('::');
   if (parts.length === 4 && parts[2] === 'have') {
@@ -1625,13 +1596,6 @@ function usedCountFor(stickerKey, excludeId) {
     for (const list of personTradeLists(name)) {
       const id = giveItemId(name, list.id, code, num);
       if (id !== excludeId && checked.has(id)) count++;
-    }
-  }
-  for (const s of state.sales) {
-    for (const item of computeSaleMatches(s.buyer)) {
-      const key = stickerDisplay(item.code, item.num);
-      const id = `${s.buyer}::sale::${key}`;
-      if (key === stickerKey && checked.has(id) && id !== excludeId) count++;
     }
   }
   return count;
@@ -2194,31 +2158,6 @@ function renderSpecialDealSection(special, personName) {
   return `<div class="section-header"><button type="button" class="explode-toggle" onclick="toggleEditSpecial('${escName}')">🤝 + Agregar Trato Especial</button></div>`;
 }
 
-function renderSaleRow(buyer, item) {
-  const stickerKey = stickerDisplay(item.code, item.num);
-  const id = `${buyer}::sale::${stickerKey}`;
-  const isChecked = checked.has(id);
-  const usedByOthers = usedCountFor(stickerKey, id);
-  const { total, remaining } = stockRemainingText(stickerKey, usedByOthers);
-  const blocked = !isChecked && remaining <= 0;
-  const sale = state.sales.find(s => s.buyer === buyer);
-  const isAlto = (sale.precioAlto || []).some(([c, n]) => c === item.code && n === item.num);
-  const label = categoryLabelOf(item.code, item.num);
-
-  let rowClass = 'trade-row sale-row';
-  if (isChecked) rowClass += ' done'; else if (blocked) rowClass += ' blocked';
-  let note = '';
-  if (blocked) note = `<div class="stock-note blocked-text">⚠ Ya no disponible — se usó en otro intercambio</div>`;
-  else if (!isChecked && total > 1 && remaining < total) note = `<div class="stock-note low-text">Quedan ${remaining} de ${total} disponibles</div>`;
-
-  return `<div class="${rowClass}">
-      <input type="checkbox" ${isChecked ? 'checked' : ''} ${blocked ? 'disabled' : ''} onchange="toggle('${id.replace(/'/g, "\\'")}')" />
-      <div class="sticker-block"><div class="sticker-code">${stickerKey}</div><div class="sticker-label">${label}</div></div>
-      <div class="price-tag ${isAlto ? '' : 'low'}">${isAlto ? 'Alto' : 'Estándar/bajo'}</div>
-      ${note ? `<div class="stock-note-wrap" style="grid-column:1/4">${note}</div>` : ''}
-    </div>`;
-}
-
 function computeSummary() {
   let totalTrades = 0, doneTrades = 0;
   for (const name of Object.keys(state.people)) {
@@ -2226,15 +2165,7 @@ function computeSummary() {
     totalTrades += total;
     doneTrades += done;
   }
-  let totalSales = 0, doneSales = 0;
-  for (const s of state.sales) {
-    for (const item of computeSaleMatches(s.buyer)) {
-      totalSales++;
-      const id = `${s.buyer}::sale::${stickerDisplay(item.code, item.num)}`;
-      if (checked.has(id)) doneSales++;
-    }
-  }
-  return { totalTrades, doneTrades, totalSales, doneSales };
+  return { totalTrades, doneTrades };
 }
 
 function renderTrades() {
@@ -2939,131 +2870,6 @@ function renderDbPersonas() {
   el.innerHTML = html;
 }
 
-// ============================================================================
-// RENDER — BASE DE DATOS: VENTAS
-// ============================================================================
-function createSaleBuyer() {
-  const name = document.getElementById('newBuyerName').value.trim();
-  const location = document.getElementById('newBuyerLocation').value.trim();
-  if (!name) { alert('Escribe un nombre'); return; }
-  if (state.sales.find(s => s.buyer === name)) { alert('Ya existe ese comprador'); return; }
-  state.sales.push({ buyer: name, location, meetPoint: location, need: {}, precioAlto: [] });
-  document.getElementById('newBuyerName').value = '';
-  document.getElementById('newBuyerLocation').value = '';
-  saveDbState();
-  renderAll();
-}
-function removeSaleBuyer(name) {
-  if (!confirm(`¿Eliminar comprador ${name}?`)) return;
-  state.sales = state.sales.filter(s => s.buyer !== name);
-  saveDbState();
-  renderAll();
-}
-function toggleSaleNeedNum(buyer, code, num) {
-  const sale = state.sales.find(s => s.buyer === buyer);
-  if (!sale.need[code]) sale.need[code] = [];
-  const idx = sale.need[code].indexOf(num);
-  if (idx >= 0) {
-    sale.need[code].splice(idx, 1);
-    if (sale.need[code].length === 0) delete sale.need[code];
-  } else {
-    sale.need[code].push(num);
-  }
-  saveDbState();
-  renderAll();
-}
-
-// Los datos ya se guardan al tocar cada número; "Guardar" solo colapsa el
-// picker de vuelta al selector, para no dejar la grilla abierta todo el tiempo.
-function collapseTengoPicker() { pickerTengo = ''; renderDbInventario(); }
-function collapseNecesitoPicker() { pickerNecesito = ''; renderDbInventario(); }
-function collapsePersonHavePicker(name) { delete pickerPersonHave[name]; renderDbPersonas(); }
-function collapsePersonNeedPicker(name) { delete pickerPersonNeed[name]; renderDbPersonas(); }
-function collapseSaleNeedPicker(buyer) { delete pickerSaleNeed[buyer]; renderDbVentas(); }
-
-function removeSaleNeed(buyer, code, num) {
-  const sale = state.sales.find(s => s.buyer === buyer);
-  sale.need[code] = sale.need[code].filter(n => n !== num);
-  if (sale.need[code].length === 0) delete sale.need[code];
-  saveDbState();
-  renderAll();
-}
-function toggleSaleAltoPrice(buyer, code, num) {
-  const sale = state.sales.find(s => s.buyer === buyer);
-  const idx = (sale.precioAlto || []).findIndex(([c, n]) => c === code && n === num);
-  if (!sale.precioAlto) sale.precioAlto = [];
-  if (idx >= 0) sale.precioAlto.splice(idx, 1); else sale.precioAlto.push([code, num]);
-  saveDbState();
-  renderAll();
-}
-
-function renderDbVentas() {
-  const el = document.getElementById('db-ventas');
-  if (!el) return;
-  const { totalSales, doneSales } = computeSummary();
-  let html = `<div class="summary-bar" style="margin-bottom:16px">
-    <div class="pill" style="background:var(--pitch);color:var(--paper)">$ <b>${doneSales}</b>/${totalSales} ventas hechas</div>
-  </div>
-  <div class="db-section">
-    <p class="db-sub">Personas que ya no tienen nada para intercambiar y sólo quieren COMPRAR stickers tuyos.</p>
-    <div class="new-person-form">
-      <input id="newBuyerName" placeholder="Nombre del comprador" />
-      <input id="newBuyerLocation" placeholder="Ubicación (opcional)" />
-      <button onclick="createSaleBuyer()">+ Nuevo Comprador</button>
-    </div>
-  </div>`;
-
-  if (state.sales.length === 0) html += '<div class="db-empty">Sin compradores todavía.</div>';
-
-  for (const sale of state.sales) {
-    const escBuyer = sale.buyer.replace(/'/g, "\\'");
-    const buyerKey = `Venta::${sale.buyer}`;
-    let needRows = [];
-    for (const code in sale.need) for (const num of sale.need[code]) needRows.push({ code, num });
-    needRows.sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
-    const matches = computeSaleMatches(sale.buyer);
-    const doneCount = matches.filter(item => checked.has(`${sale.buyer}::sale::${stickerDisplay(item.code, item.num)}`)).length;
-
-    const meet = meetInfo[buyerKey] || {};
-    const meetPlace = meet.place !== undefined ? meet.place : sale.location;
-    const meetDate = meet.date || '';
-    const meetTime = meet.time || '';
-
-    html += `<div class="person-manage-card">
-      <div class="person-manage-head">
-        <div class="info"><div class="name">${sale.buyer}</div><div class="count">${sale.location || '(sin ubicación)'} · ${doneCount}/${matches.length} vendidos</div></div>
-        <div class="person-manage-actions"><button class="del" onclick="removeSaleBuyer('${escBuyer}')">Eliminar</button></div>
-      </div>
-      <div class="person-manage-body open">
-        <div class="meet-edit-row" style="margin-bottom:14px">
-          <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Fecha</label><input type="date" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetDate}" onchange="updateMeet(this,'date')" />${!meetDate ? '<span class="meet-undefined">Sin definir</span>' : ''}</div>
-          <div class="meet-field" style="color:var(--ink)"><label style="color:var(--muted)">Hora</label><input type="time" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" data-person="${buyerKey}" value="${meetTime}" onchange="updateMeet(this,'time')" /></div>
-          <div class="meet-field place" style="color:var(--ink)"><label style="color:var(--muted)">Lugar</label><input type="text" style="background:#fff;border-color:var(--paper-line);color:var(--ink)" placeholder="Lugar de encuentro" data-person="${buyerKey}" value="${(meetPlace || '').replace(/"/g, '&quot;')}" onchange="updateMeet(this,'place')" /></div>
-        </div>
-        ${matches.length ? `<h3 style="font-family:'Barlow Condensed',sans-serif;font-size:15px;margin:0 0 6px;color:var(--pitch-dark)">Disponibles para vender ahora (${doneCount}/${matches.length})</h3>
-        <div class="db-list" id="saleMatchesList-${cssId(sale.buyer)}" style="margin-bottom:14px">${matches.map(item => renderSaleRow(sale.buyer, item)).join('')}</div>` : ''}
-        <div class="team-picker">
-          <div class="team-picker-row">
-            <select class="team-select" onchange="pickerSaleNeed['${escBuyer}']=this.value; renderDbVentas();">${teamOptionsHtml(pickerSaleNeed[sale.buyer])}</select>
-          </div>
-          ${numberGridHtml(pickerSaleNeed[sale.buyer], new Set(sale.need[pickerSaleNeed[sale.buyer]] || []), n => `toggleSaleNeedNum('${escBuyer}','${pickerSaleNeed[sale.buyer]}',${n})`)}
-          ${collapseButtonHtml(pickerSaleNeed[sale.buyer], `collapseSaleNeedPicker('${escBuyer}')`)}
-        </div>
-        <div class="db-list" id="saleNeedList-${cssId(sale.buyer)}">${needRows.length ? needRows.map(r => {
-          const isAlto = (sale.precioAlto || []).some(([c, n]) => c === r.code && n === r.num);
-          const has = tengoQty(r.code, r.num) > 0;
-          return `<div class="db-row">
-            <span class="code">${stickerDisplay(r.code, r.num)}</span>
-            <span class="label">${categoryLabelOf(r.code, r.num)} ${has ? '✅ lo tienes' : '— no lo tienes'}</span>
-            <label style="font-size:10.5px;display:flex;align-items:center;gap:3px;"><input type="checkbox" ${isAlto ? 'checked' : ''} onchange="toggleSaleAltoPrice('${sale.buyer.replace(/'/g, "\\'")}','${r.code}',${r.num})" /> Precio alto</label>
-            <button class="del" onclick="removeSaleNeed('${sale.buyer.replace(/'/g, "\\'")}','${r.code}',${r.num})">✕</button>
-          </div>`;
-        }).join('') : '<div class="db-empty">Sin datos</div>'}</div>
-      </div>
-    </div>`;
-  }
-  el.innerHTML = html;
-}
 
 // ============================================================================
 // INIT
