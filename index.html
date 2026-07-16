@@ -297,6 +297,8 @@
   }
   .trade-list-tab:hover { border-color: var(--pitch); }
   .trade-list-tab.active { background: var(--pitch); color: var(--paper); border-color: var(--pitch); }
+  .trade-list-tab.complete { border-color: var(--green-check); color: var(--green-check); }
+  .trade-list-tab.complete.active { background: var(--green-check); color: #fff; border-color: var(--green-check); }
   .trade-list-tab-add {
     font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; text-transform: none;
     background: var(--gold); color: var(--pitch-dark); border: none; border-radius: 999px; padding: 5px 12px; cursor: pointer;
@@ -1094,10 +1096,12 @@ var pendingCompletePerson = null;
 // side = 'have' (lo que ella tiene) o 'give' (lo que yo tengo). Sólo de la
 // sesión actual, no se persiste.
 var expandedFiller = new Set();
-// Secciones grandes colapsadas por el usuario ("Intercambio programado" /
-// "Lista preliminar" de una persona) — clave `${personName}::${sectionKey}`,
-// no está en el set = expandida por defecto. Sólo de la sesión actual.
-var collapsedTradeSections = new Set();
+// Secciones grandes expandidas por el usuario ("Intercambio programado" /
+// "Lista preliminar" de una lista de una persona) — clave
+// `${personName}::${listId}::${sectionKey}`; NO estar en el set = colapsada
+// por defecto (arrancan cerradas para no saturar la tarjeta). Sólo de la
+// sesión actual, no se persiste.
+var expandedTradeSections = new Set();
 // Nombre de la persona cuyo Trato Especial se está editando ahora mismo
 // (formulario abierto) — null si ninguno. No se persiste.
 var editingSpecialFor = null;
@@ -1330,6 +1334,23 @@ function eligiblePeopleNames() {
 // (sólo un aviso/conflicto) nunca cuenta como completado.
 function isPersonComplete(name) {
   const { total, done } = personTradeTotals(name);
+  return total > 0 && done === total;
+}
+// Igual que personTradeTotals pero acotado a UNA lista puntual — para poder
+// avisar en la pestaña "esta lista ya está completa" aunque el resto de la
+// persona (otra lista) siga pendiente.
+function listTradeTotals(personName, listId) {
+  const haveSel = personSelectedHaveItems(personName, listId);
+  const giveSel = personSelectedGiveItems(personName, listId);
+  const special = isPrimaryTradeList(personName, listId) ? personSpecialDeal(personName) : null;
+  const total = haveSel.length + giveSel.length + (special ? 1 : 0);
+  const done = haveSel.filter(it => checked.has(it.id)).length
+    + giveSel.filter(it => checked.has(it.id)).length
+    + (special && checked.has(special.id) ? 1 : 0);
+  return { total, done };
+}
+function isListComplete(personName, listId) {
+  const { total, done } = listTradeTotals(personName, listId);
   return total > 0 && done === total;
 }
 
@@ -1666,7 +1687,7 @@ function navigateToTradeRow(mode, startIndex, delta) {
   const listId = itemListIdFromId(occ.pairId);
   if (listId) {
     activeListByPerson[occ.personName] = listId;
-    collapsedTradeSections.delete(`${occ.personName}::${listId}::programmed`);
+    expandedTradeSections.add(`${occ.personName}::${listId}::programmed`);
   }
   renderAll();
   requestAnimationFrame(() => {
@@ -2004,7 +2025,7 @@ function renderProgrammedItemsHtml(personName, listId) {
 // dos grandes secciones de una lista de una persona (Intercambio programado /
 // Lista preliminar) — un clic las contrae o expande.
 function tradeSectionHeaderHtml(personName, listId, sectionKey, label) {
-  const isCollapsed = collapsedTradeSections.has(`${personName}::${listId}::${sectionKey}`);
+  const isCollapsed = !expandedTradeSections.has(`${personName}::${listId}::${sectionKey}`);
   const escName = personName.replace(/'/g, "\\'");
   const escList = listId.replace(/'/g, "\\'");
   return `<div class="section-header sticky-header" onclick="toggleTradeSection('${escName}','${escList}','${sectionKey}')">
@@ -2012,11 +2033,11 @@ function tradeSectionHeaderHtml(personName, listId, sectionKey, label) {
     </div>`;
 }
 function isTradeSectionCollapsed(personName, listId, sectionKey) {
-  return collapsedTradeSections.has(`${personName}::${listId}::${sectionKey}`);
+  return !expandedTradeSections.has(`${personName}::${listId}::${sectionKey}`);
 }
 function toggleTradeSection(personName, listId, sectionKey) {
   const key = `${personName}::${listId}::${sectionKey}`;
-  if (collapsedTradeSections.has(key)) collapsedTradeSections.delete(key); else collapsedTradeSections.add(key);
+  if (expandedTradeSections.has(key)) expandedTradeSections.delete(key); else expandedTradeSections.add(key);
   renderTrades();
 }
 // El Trato Especial sigue siendo el único caso 1x1 fijo — una sola fila con
@@ -2245,7 +2266,8 @@ function renderTrades() {
       html += `<div class="trade-list-tabs">`;
       for (const list of lists) {
         const isActive = list.id === activeListId;
-        html += `<button type="button" class="trade-list-tab ${isActive ? 'active' : ''}" onclick="switchPersonList('${escName}','${list.id}')">${list.name}</button>`;
+        const isComplete = lists.length > 1 && isListComplete(name, list.id);
+        html += `<button type="button" class="trade-list-tab ${isActive ? 'active' : ''} ${isComplete ? 'complete' : ''}" title="${isComplete ? 'Esta lista ya está completa' : ''}" onclick="switchPersonList('${escName}','${list.id}')">${isComplete ? '✅ ' : ''}${list.name}</button>`;
       }
       html += `<button type="button" class="trade-list-tab-add" title="Crear una nueva lista de intercambio con ${name.split(' ')[0]}" onclick="addTradeList('${escName}')">+ Nueva lista</button>`;
       html += `<button type="button" class="trade-list-tab-action" title="Renombrar la lista «${activeList.name}»" onclick="renameTradeList('${escName}','${activeListId}')">✎ Renombrar</button>`;
