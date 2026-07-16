@@ -286,6 +286,28 @@
     padding: 3px 9px; cursor: pointer; letter-spacing: normal;
   }
   .explode-toggle:hover { background: var(--pitch); color: #fff; }
+  .trade-list-tabs {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 10px 16px; border-top: 1px solid var(--paper-line); background: var(--paper);
+  }
+  .trade-list-tab {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase;
+    background: #fff; border: 1px solid var(--paper-line); border-radius: 999px; padding: 5px 12px; cursor: pointer;
+    color: var(--pitch-dark);
+  }
+  .trade-list-tab:hover { border-color: var(--pitch); }
+  .trade-list-tab.active { background: var(--pitch); color: var(--paper); border-color: var(--pitch); }
+  .trade-list-tab-add {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; text-transform: none;
+    background: var(--gold); color: var(--pitch-dark); border: none; border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  }
+  .trade-list-tab-add:hover { background: #b6901f; }
+  .trade-list-tab-action {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 11.5px; font-weight: 700; text-transform: none;
+    background: #fff; border: 1px solid var(--paper-line); color: var(--muted); border-radius: 999px;
+    padding: 5px 10px; cursor: pointer;
+  }
+  .trade-list-tab-action:hover { background: var(--pitch); color: #fff; border-color: var(--pitch); }
   .people-group { margin-bottom: 8px; }
   .group-header {
     font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 700;
@@ -789,28 +811,122 @@ function shortLabel(label) {
 // puede ser mucho stock). El trato es simplemente la cantidad de cada
 // lado, sin importar qué unidad puntual termina emparejada con cuál.
 // ============================================================================
-function haveItemId(personName, code, num) {
-  return `${personName}::have::${code} ${num}`;
+function haveItemId(personName, listId, code, num) {
+  return `${personName}::${listId}::have::${code} ${num}`;
 }
-function giveItemId(personName, code, num) {
-  return `${personName}::give::${code} ${num}`;
+function giveItemId(personName, listId, code, num) {
+  return `${personName}::${listId}::give::${code} ${num}`;
+}
+// ----------------------------------------------------------------------------
+// LISTAS DE INTERCAMBIO POR PERSONA — cada persona puede tener más de un
+// trato en paralelo (ej: el intercambio principal balanceado, y una lista
+// aparte sólo para ayudarla con repetidos). Cada lista tiene su propio
+// "seleccionado"/"confirmado" independiente; un sticker sólo puede estar
+// tomado por UNA lista a la vez (ver haveItemOwnerList/giveItemOwnerList).
+// ----------------------------------------------------------------------------
+function defaultTradeLists() {
+  return [{ id: 'main', name: 'Intercambio principal' }];
+}
+function personTradeLists(personName) {
+  const person = state.people[personName];
+  if (!person) return defaultTradeLists();
+  if (!person.tradeLists || !person.tradeLists.length) person.tradeLists = defaultTradeLists();
+  return person.tradeLists;
+}
+function genListId() {
+  return 'list_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+function addTradeList(personName) {
+  const name = prompt('Nombre de la nueva lista de intercambio (ej: "Ayuda extra", "Trato aparte"):');
+  if (!name || !name.trim()) return;
+  const lists = personTradeLists(personName);
+  const list = { id: genListId(), name: name.trim() };
+  lists.push(list);
+  activeListByPerson[personName] = list.id;
+  saveDbState();
+  renderAll();
+}
+function renameTradeList(personName, listId) {
+  const list = personTradeLists(personName).find(l => l.id === listId);
+  if (!list) return;
+  const name = prompt('Nuevo nombre para la lista:', list.name);
+  if (!name || !name.trim()) return;
+  list.name = name.trim();
+  saveDbState();
+  renderAll();
+}
+function removeTradeList(personName, listId) {
+  const lists = personTradeLists(personName);
+  if (lists.length <= 1) { alert('No podés borrar la única lista de intercambio con esta persona.'); return; }
+  const list = lists.find(l => l.id === listId);
+  if (!list) return;
+  if (!confirm(`¿Eliminar la lista "${list.name}"? Se saca de la selección todo lo que tenía marcado ahí (no toca tu base de datos de Tengo/Necesito).`)) return;
+  state.people[personName].tradeLists = lists.filter(l => l.id !== listId);
+  const prefix = `${personName}::${listId}::`;
+  [...selected].forEach(id => { if (id.startsWith(prefix)) selected.delete(id); });
+  [...checked].forEach(id => { if (id.startsWith(prefix)) checked.delete(id); });
+  Object.keys(valueOverrides).forEach(id => { if (id.startsWith(prefix)) delete valueOverrides[id]; });
+  if (activeListByPerson[personName] === listId) activeListByPerson[personName] = state.people[personName].tradeLists[0].id;
+  saveDbState();
+  saveTrackingState();
+  renderAll();
+}
+function switchPersonList(personName, listId) {
+  activeListByPerson[personName] = listId;
+  renderTrades();
+}
+// A qué lista (si alguna) ya pertenece este sticker de "recibo"/"doy" para
+// esta persona — un sticker sólo puede estar tomado por una lista a la vez,
+// así que una vez elegido en una desaparece de las demás.
+function haveItemOwnerList(personName, code, num) {
+  for (const list of personTradeLists(personName)) {
+    if (selected.has(haveItemId(personName, list.id, code, num))) return list.id;
+  }
+  return null;
+}
+function giveItemOwnerList(personName, code, num) {
+  for (const list of personTradeLists(personName)) {
+    if (selected.has(giveItemId(personName, list.id, code, num))) return list.id;
+  }
+  return null;
+}
+// ¿Tiene esta persona algo útil disponible en cualquiera de sus listas? —
+// para decidir si aparece en Intercambios, sin importar en qué lista termine.
+function personHasUsefulItems(personName) {
+  const person = state.people[personName];
+  if (!person) return false;
+  for (const code in person.have) {
+    for (const numStr in person.have[code]) {
+      if (necesitoHas(code, parseInt(numStr, 10))) return true;
+    }
+  }
+  for (const code in state.tengo) {
+    for (const numStr in state.tengo[code]) {
+      const num = parseInt(numStr, 10);
+      if (state.tengo[code][numStr] > 0 && personNeedsThis(personName, code, num)) return true;
+    }
+  }
+  return false;
 }
 // Todo lo que la persona TIENE, separado en lo que a mí me sirve
 // (necesitoHas) y el resto (relleno) — no filtra por stock del otro lado,
 // así que puede excederse; cada línea es una unidad de intercambio "por
-// cantidad", no un emparejamiento.
-function personHaveItems(personName) {
+// cantidad", no un emparejamiento. Excluye lo que ya está tomado por OTRA
+// lista de la misma persona (ver haveItemOwnerList).
+function personHaveItems(personName, listId) {
   const person = state.people[personName];
   const useful = [], filler = [];
   if (!person) return { useful, filler };
   for (const code in person.have) {
     for (const numStr in person.have[code]) {
       const num = parseInt(numStr, 10);
+      const owner = haveItemOwnerList(personName, code, num);
+      if (owner && owner !== listId) continue;
       const qty = person.have[code][numStr];
       const item = {
         code, num, qty,
         key: stickerDisplay(code, num), label: categoryLabelOf(code, num),
-        id: haveItemId(personName, code, num),
+        id: haveItemId(personName, listId, code, num),
       };
       (necesitoHas(code, num) ? useful : filler).push(item);
     }
@@ -820,18 +936,21 @@ function personHaveItems(personName) {
   return { useful, filler };
 }
 // Todo lo que YO tengo (state.tengo), separado en lo que le sirve a esta
-// persona (personNeedsThis) y el resto (relleno).
-function personGiveItems(personName) {
+// persona (personNeedsThis) y el resto (relleno). Misma exclusión de
+// listas que personHaveItems.
+function personGiveItems(personName, listId) {
   const useful = [], filler = [];
   for (const code in state.tengo) {
     for (const numStr in state.tengo[code]) {
       const num = parseInt(numStr, 10);
       const qty = state.tengo[code][numStr];
       if (qty <= 0) continue;
+      const owner = giveItemOwnerList(personName, code, num);
+      if (owner && owner !== listId) continue;
       const item = {
         code, num, qty,
         key: stickerDisplay(code, num), label: categoryLabelOf(code, num),
-        id: giveItemId(personName, code, num),
+        id: giveItemId(personName, listId, code, num),
       };
       (personNeedsThis(personName, code, num) ? useful : filler).push(item);
     }
@@ -855,13 +974,21 @@ function personSpecialDeal(personName) {
 // De todo lo que tiene la persona (útil + relleno), sólo lo que se marcó
 // como parte del "Intercambio programado" — la lista preliminar es sólo
 // para elegir, esto es lo que realmente se va a intercambiar.
-function personSelectedHaveItems(personName) {
-  const { useful, filler } = personHaveItems(personName);
+function personSelectedHaveItems(personName, listId) {
+  const { useful, filler } = personHaveItems(personName, listId);
   return [...useful, ...filler].filter(it => selected.has(it.id));
 }
-function personSelectedGiveItems(personName) {
-  const { useful, filler } = personGiveItems(personName);
+function personSelectedGiveItems(personName, listId) {
+  const { useful, filler } = personGiveItems(personName, listId);
   return [...useful, ...filler].filter(it => selected.has(it.id));
+}
+// Selección agregada de TODAS las listas de la persona — para totales,
+// progreso, y cualquier cómputo que no dependa de una lista puntual.
+function personAllSelectedHaveItems(personName) {
+  return personTradeLists(personName).flatMap(l => personSelectedHaveItems(personName, l.id));
+}
+function personAllSelectedGiveItems(personName) {
+  return personTradeLists(personName).flatMap(l => personSelectedGiveItems(personName, l.id));
 }
 // Marca/desmarca un sticker como parte del intercambio que se va a hacer
 // (lista preliminar). Al sacarlo de la selección también se saca la
@@ -955,12 +1082,22 @@ var _flatOccByMode = { blocked: [], conflicts: [] };
 // flotante — activeNav = { mode } cuando hay una revisión activa, null si no.
 var navFlatIndex = 0;
 var activeNav = null;
+// Lista de intercambio activa (pestaña visible) por persona — clave
+// personName, valor el id de la lista. Sólo de la sesión actual; si no hay
+// entrada o la lista ya no existe, se usa la primera de personTradeLists.
+var activeListByPerson = {};
 
 // Devuelve el nombre de la persona a partir de un id de item (have/give/
-// special) — id con formato `${personName}::have|give|special::...`.
+// special/sale) — el nombre es siempre el primer segmento separado por "::".
 function itemPersonName(id) {
-  const m = id.match(/^(.*)::(have|give|special)::/);
-  return m ? m[1] : id;
+  return id.split('::')[0];
+}
+// Id de la lista de intercambio a la que pertenece un id de item have/give
+// (formato `${personName}::${listId}::have|give::...`) — null para ids sin
+// lista (Trato Especial o ventas).
+function itemListIdFromId(id) {
+  const parts = id.split('::');
+  return (parts.length === 4 && (parts[2] === 'have' || parts[2] === 'give')) ? parts[1] : null;
 }
 
 // FWC_trofeo y FWC_mundo no existen como secciones separadas en el álbum real
@@ -999,6 +1136,52 @@ function migrateFwcCategories() {
   return changed;
 }
 
+// Toda persona necesita al menos una lista de intercambio (personTradeLists
+// ya la crea "al vuelo" si falta, pero acá se fuerza y persiste para que
+// quede guardada desde la primera carga después de esta migración).
+function migrateTradeLists() {
+  let changed = false;
+  for (const name in state.people) {
+    if (!state.people[name].tradeLists || !state.people[name].tradeLists.length) {
+      state.people[name].tradeLists = defaultTradeLists();
+      changed = true;
+    }
+  }
+  return changed;
+}
+// Ids viejos de have/give (antes de que existieran las listas) tenían el
+// formato `${personName}::have|give::${code} ${num}` (3 segmentos) — se
+// migran insertando 'main' como listId, para que sigan contando como parte
+// de la lista "Intercambio principal" de cada persona.
+function migrateIdToMainList(id) {
+  const parts = id.split('::');
+  if (parts.length === 3 && (parts[1] === 'have' || parts[1] === 'give')) {
+    return `${parts[0]}::main::${parts[1]}::${parts[2]}`;
+  }
+  return id;
+}
+function migrateSetIds(set) {
+  let changed = false;
+  const result = new Set();
+  for (const id of set) {
+    const migrated = migrateIdToMainList(id);
+    if (migrated !== id) changed = true;
+    result.add(migrated);
+  }
+  return { result, changed };
+}
+function migrateValueOverrideKeys() {
+  let changed = false;
+  const result = {};
+  for (const id in valueOverrides) {
+    const migrated = migrateIdToMainList(id);
+    if (migrated !== id) changed = true;
+    result[migrated] = valueOverrides[id];
+  }
+  valueOverrides = result;
+  return changed;
+}
+
 // ============================================================================
 // CARGA / GUARDADO
 // ============================================================================
@@ -1024,7 +1207,9 @@ async function loadAll() {
     await saveDbState();
   }
 
-  if (migrateFwcCategories()) await saveDbState();
+  let dbChanged = migrateFwcCategories();
+  if (migrateTradeLists()) dbChanged = true;
+  if (dbChanged) await saveDbState();
 
   // Las listas de intercambio arrancan colapsadas por defecto en cada carga.
   collapsedPeople = new Set(Object.keys(state.people));
@@ -1049,6 +1234,15 @@ async function loadAll() {
     const r = await window.storage.get('panini-tracker-valueoverrides', false);
     if (r && r.value) valueOverrides = JSON.parse(r.value);
   } catch (e) {}
+
+  // Migra ids viejos (sin listId) de selected/checked/valueOverrides a la
+  // lista "main" — sólo aplica una vez, en la primera carga después de
+  // haber introducido las listas de intercambio.
+  let trackingChanged = false;
+  { const { result, changed } = migrateSetIds(selected); selected = result; if (changed) trackingChanged = true; }
+  { const { result, changed } = migrateSetIds(checked); checked = result; if (changed) trackingChanged = true; }
+  if (migrateValueOverrideKeys()) trackingChanged = true;
+  if (trackingChanged) await saveTrackingState();
 
   loaded = true;
   renderAll();
@@ -1080,8 +1274,8 @@ async function saveTrackingState() {
 // lo útil disponible) más el Trato Especial — la base para el progreso y
 // para decidir si una persona sigue "en curso" o ya está "completada".
 function personTradeTotals(name) {
-  const haveSel = personSelectedHaveItems(name);
-  const giveSel = personSelectedGiveItems(name);
+  const haveSel = personAllSelectedHaveItems(name);
+  const giveSel = personAllSelectedGiveItems(name);
   const special = personSpecialDeal(name);
   const total = haveSel.length + giveSel.length + (special ? 1 : 0);
   const done = haveSel.filter(it => checked.has(it.id)).length
@@ -1094,9 +1288,7 @@ function personTradeTotals(name) {
 // un aviso/conflicto puntual.
 function eligiblePeopleNames() {
   return Object.keys(state.people).filter(name => {
-    const { useful: haveUseful } = personHaveItems(name);
-    const { useful: giveUseful } = personGiveItems(name);
-    return haveUseful.length > 0 || giveUseful.length > 0 || !!personSpecialDeal(name) || !!state.people[name].conflicto;
+    return personHasUsefulItems(name) || !!personSpecialDeal(name) || !!state.people[name].conflicto;
   });
 }
 
@@ -1289,21 +1481,24 @@ function acceptCompleteModal() {
 // en un trato completado con ella específicamente.
 function personGivenCount(personName, stickerKey) {
   const { code, num } = codeNumFromKey(stickerKey);
-  return checked.has(giveItemId(personName, code, num)) ? 1 : 0;
+  return personTradeLists(personName).some(l => checked.has(giveItemId(personName, l.id, code, num))) ? 1 : 0;
 }
 function personReceivedCount(personName, stickerKey) {
   const { code, num } = codeNumFromKey(stickerKey);
-  return checked.has(haveItemId(personName, code, num)) ? 1 : 0;
+  return personTradeLists(personName).some(l => checked.has(haveItemId(personName, l.id, code, num))) ? 1 : 0;
 }
 // Cuántas personas distintas ya tienen este sticker mío marcado como
-// entregado (✓) — para Base de Datos ("ya entregado") y para saber cuánto
-// queda disponible en cada lista de intercambio.
+// entregado (✓), en cualquiera de sus listas — para Base de Datos ("ya
+// entregado") y para saber cuánto queda disponible en cada lista de
+// intercambio.
 function usedCountFor(stickerKey, excludeId) {
   const { code, num } = codeNumFromKey(stickerKey);
   let count = 0;
   for (const name of Object.keys(state.people)) {
-    const id = giveItemId(name, code, num);
-    if (id !== excludeId && checked.has(id)) count++;
+    for (const list of personTradeLists(name)) {
+      const id = giveItemId(name, list.id, code, num);
+      if (id !== excludeId && checked.has(id)) count++;
+    }
   }
   for (const s of state.sales) {
     for (const item of computeSaleMatches(s.buyer)) {
@@ -1315,12 +1510,15 @@ function usedCountFor(stickerKey, excludeId) {
   return count;
 }
 // Espejo de usedCountFor: cuántas veces ya se RECIBIÓ este sticker (en
-// cualquier persona) — para Base de Datos ("ya conseguido").
+// cualquier persona, en cualquiera de sus listas) — para Base de Datos
+// ("ya conseguido").
 function receivedCountFor(stickerKey) {
   const { code, num } = codeNumFromKey(stickerKey);
   let count = 0;
   for (const name of Object.keys(state.people)) {
-    if (checked.has(haveItemId(name, code, num))) count++;
+    for (const list of personTradeLists(name)) {
+      if (checked.has(haveItemId(name, list.id, code, num))) count++;
+    }
   }
   return count;
 }
@@ -1344,13 +1542,15 @@ function stockRemainingText(stickerKey, usedExcl) {
 function computeBlockedOccurrences() {
   const byKey = {};
   for (const name of Object.keys(state.people)) {
-    for (const item of personSelectedGiveItems(name)) {
-      if (checked.has(item.id)) continue;
-      const used = usedCountFor(item.key, item.id);
-      const { remaining } = stockRemainingText(item.key, used);
-      if (remaining <= 0) {
-        if (!byKey[item.key]) byKey[item.key] = [];
-        byKey[item.key].push({ personName: name, pairId: item.id });
+    for (const list of personTradeLists(name)) {
+      for (const item of personSelectedGiveItems(name, list.id)) {
+        if (checked.has(item.id)) continue;
+        const used = usedCountFor(item.key, item.id);
+        const { remaining } = stockRemainingText(item.key, used);
+        if (remaining <= 0) {
+          if (!byKey[item.key]) byKey[item.key] = [];
+          byKey[item.key].push({ personName: name, pairId: item.id });
+        }
       }
     }
   }
@@ -1362,12 +1562,14 @@ function computeBlockedOccurrences() {
 function computeStockConflicts() {
   const usage = {};
   for (const name of Object.keys(state.people)) {
-    for (const item of personSelectedGiveItems(name)) {
-      if (!checked.has(item.id)) continue;
-      if (!usage[item.key]) usage[item.key] = { count: 0, people: new Set(), occurrences: [] };
-      usage[item.key].count++;
-      usage[item.key].people.add(name);
-      usage[item.key].occurrences.push({ personName: name, pairId: item.id });
+    for (const list of personTradeLists(name)) {
+      for (const item of personSelectedGiveItems(name, list.id)) {
+        if (!checked.has(item.id)) continue;
+        if (!usage[item.key]) usage[item.key] = { count: 0, people: new Set(), occurrences: [] };
+        usage[item.key].count++;
+        usage[item.key].people.add(name);
+        usage[item.key].occurrences.push({ personName: name, pairId: item.id });
+      }
     }
   }
   const conflicts = [];
@@ -1414,6 +1616,11 @@ function navigateToTradeRow(mode, startIndex, delta) {
   activeNav = { mode };
   const occ = flat[idx];
   collapsedPeople.delete(occ.personName);
+  const listId = itemListIdFromId(occ.pairId);
+  if (listId) {
+    activeListByPerson[occ.personName] = listId;
+    collapsedTradeSections.delete(`${occ.personName}::${listId}::programmed`);
+  }
   renderAll();
   requestAnimationFrame(() => {
     const el = document.querySelector(`[data-row-id="${CSS.escape(occ.pairId)}"]`);
@@ -1529,9 +1736,10 @@ function editPersonFromTrades(name) {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 // Expande/colapsa la sección "no útil / relleno" de un lado (have/give) de
-// una persona — colapsada por defecto porque puede ser mucho stock.
-function toggleFillerExpand(personName, side) {
-  const key = `${personName}::${side}`;
+// una lista de una persona — colapsada por defecto porque puede ser mucho
+// stock.
+function toggleFillerExpand(personName, listId, side) {
+  const key = `${personName}::${listId}::${side}`;
   if (expandedFiller.has(key)) expandedFiller.delete(key); else expandedFiller.add(key);
   renderTrades();
 }
@@ -1552,26 +1760,36 @@ function keyWithPlayerName(key) {
   const player = premiumOf(code, num);
   return player ? `${key} (${shortLabel(player)})` : key;
 }
-// Cuenta los stickers de cada lado — por cantidad, así que el total de un
-// lado puede no coincidir con el del otro.
-function countTradeStickers(personName) {
-  const haveSel = personSelectedHaveItems(personName);
-  const giveSel = personSelectedGiveItems(personName);
-  const special = personSpecialDeal(personName);
+// El Trato Especial no pertenece a ninguna lista puntual (es un 1x1 fijo
+// aparte) — por convención se cuenta/exporta junto con la PRIMERA lista de
+// la persona, para no duplicarlo si hay varias listas.
+function isPrimaryTradeList(personName, listId) {
+  const lists = personTradeLists(personName);
+  return lists.length > 0 && lists[0].id === listId;
+}
+// Cuenta los stickers de cada lado de UNA lista puntual — por cantidad, así
+// que el total de un lado puede no coincidir con el del otro.
+function countTradeStickers(personName, listId) {
+  const haveSel = personSelectedHaveItems(personName, listId);
+  const giveSel = personSelectedGiveItems(personName, listId);
+  const special = isPrimaryTradeList(personName, listId) ? personSpecialDeal(personName) : null;
   const reciboCount = haveSel.length + (special ? 1 : 0);
   const doyCount = giveSel.length + (special ? 1 : 0);
   return { reciboCount, doyCount };
 }
 // Texto simple para copiar y mandar por mensaje: dos listas planas (sin
-// categorías) — todo lo que la persona entrega, y todo lo que entrega Dani.
-function buildTradeSummaryText(personName) {
+// categorías) — todo lo que la persona entrega, y todo lo que entrega Dani,
+// para UNA lista de intercambio puntual.
+function buildTradeSummaryText(personName, listId) {
   const person = state.people[personName];
   const firstName = personName.split(' ')[0];
   const meet = meetInfo[personName] || {};
   const meetPlace = meet.place !== undefined ? meet.place : person.meetPoint;
-  const special = personSpecialDeal(personName);
-  const haveSel = personSelectedHaveItems(personName);
-  const giveSel = personSelectedGiveItems(personName);
+  const lists = personTradeLists(personName);
+  const list = lists.find(l => l.id === listId) || lists[0];
+  const special = isPrimaryTradeList(personName, list.id) ? personSpecialDeal(personName) : null;
+  const haveSel = personSelectedHaveItems(personName, list.id);
+  const giveSel = personSelectedGiveItems(personName, list.id);
 
   const haveList = special
     ? [...haveSel, { id: special.id, key: stickerDisplay(special.recibo_code, special.recibo_num), qty: 1 }]
@@ -1580,7 +1798,8 @@ function buildTradeSummaryText(personName) {
     ? [...giveSel, { id: special.id, key: stickerDisplay(special.doy_code, special.doy_num), qty: 1 }]
     : giveSel;
 
-  const lines = [`Intercambio entre : Dani y ${firstName}`];
+  const listSuffix = lists.length > 1 ? ` — ${list.name}` : '';
+  const lines = [`Intercambio entre : Dani y ${firstName}${listSuffix}`];
   lines.push(`Fecha: ${meet.date ? formatDateEs(meet.date) : ''}`);
   lines.push(`Horario: ${meet.time || ''}`);
   lines.push(`Lugar de encuentro: ${meetPlace || ''}`);
@@ -1601,8 +1820,8 @@ function buildTradeSummaryText(personName) {
 
   return lines.join('\n').trim();
 }
-function exportTradeSummary(personName) {
-  const text = buildTradeSummaryText(personName);
+function exportTradeSummary(personName, listId) {
+  const text = buildTradeSummaryText(personName, listId);
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(
       () => alert('✅ Resumen copiado al portapapeles. Ya lo podés pegar donde quieras enviarlo.'),
@@ -1673,24 +1892,25 @@ function renderItemRow(item, side, personName, mode) {
 // Una sección de la lista PRELIMINAR (útil o relleno) para un lado
 // (have/give) de una persona. La de relleno arranca colapsada — puede ser
 // mucho stock — y se expande con un clic; la útil siempre está abierta.
-function renderItemSection(personName, side, items, sectionLabel, isFiller) {
+function renderItemSection(personName, listId, side, items, sectionLabel, isFiller) {
   if (!items.length) return '';
   if (!isFiller) {
     return `<div class="item-section-header">${sectionLabel} (${items.length})</div>
       <div class="item-list">${items.map(it => renderItemRow(it, side, personName, 'select')).join('')}</div>`;
   }
-  const expanded = expandedFiller.has(`${personName}::${side}`);
+  const expanded = expandedFiller.has(`${personName}::${listId}::${side}`);
   const escName = personName.replace(/'/g, "\\'");
-  return `<button type="button" class="filler-toggle" onclick="toggleFillerExpand('${escName}','${side}')">${expanded ? '▾' : '▸'} ${sectionLabel} (${items.length})</button>
+  const escList = listId.replace(/'/g, "\\'");
+  return `<button type="button" class="filler-toggle" onclick="toggleFillerExpand('${escName}','${escList}','${side}')">${expanded ? '▾' : '▸'} ${sectionLabel} (${items.length})</button>
     ${expanded ? `<div class="item-list">${items.map(it => renderItemRow(it, side, personName, 'select')).join('')}</div>` : ''}`;
 }
 // Contenido del "Intercambio programado" (sin encabezado propio — el
 // encabezado colapsable/fijo lo pone tradeSectionHeaderHtml): sólo lo que
 // se seleccionó en la lista preliminar, con su propio checkbox de
 // CONFIRMACIÓN — éste es el que realmente descuenta stock cuando se marca.
-function renderProgrammedItemsHtml(personName) {
-  const haveSel = personSelectedHaveItems(personName);
-  const giveSel = personSelectedGiveItems(personName);
+function renderProgrammedItemsHtml(personName, listId) {
+  const haveSel = personSelectedHaveItems(personName, listId);
+  const giveSel = personSelectedGiveItems(personName, listId);
   if (!haveSel.length && !giveSel.length) {
     return `<p class="status-panel-empty" style="padding:0 16px 12px">Todavía no seleccionaste nada de la lista preliminar.</p>`;
   }
@@ -1704,20 +1924,21 @@ function renderProgrammedItemsHtml(personName) {
     </div>`;
 }
 // Encabezado colapsable y FIJO (sticky, no se va con el scroll) para las
-// dos grandes secciones de una persona (Intercambio programado / Lista
-// preliminar) — un clic las contrae o expande.
-function tradeSectionHeaderHtml(personName, sectionKey, label) {
-  const isCollapsed = collapsedTradeSections.has(`${personName}::${sectionKey}`);
+// dos grandes secciones de una lista de una persona (Intercambio programado /
+// Lista preliminar) — un clic las contrae o expande.
+function tradeSectionHeaderHtml(personName, listId, sectionKey, label) {
+  const isCollapsed = collapsedTradeSections.has(`${personName}::${listId}::${sectionKey}`);
   const escName = personName.replace(/'/g, "\\'");
-  return `<div class="section-header sticky-header" onclick="toggleTradeSection('${escName}','${sectionKey}')">
+  const escList = listId.replace(/'/g, "\\'");
+  return `<div class="section-header sticky-header" onclick="toggleTradeSection('${escName}','${escList}','${sectionKey}')">
       <span>${isCollapsed ? '▸' : '▾'} ${label}</span>
     </div>`;
 }
-function isTradeSectionCollapsed(personName, sectionKey) {
-  return collapsedTradeSections.has(`${personName}::${sectionKey}`);
+function isTradeSectionCollapsed(personName, listId, sectionKey) {
+  return collapsedTradeSections.has(`${personName}::${listId}::${sectionKey}`);
 }
-function toggleTradeSection(personName, sectionKey) {
-  const key = `${personName}::${sectionKey}`;
+function toggleTradeSection(personName, listId, sectionKey) {
+  const key = `${personName}::${listId}::${sectionKey}`;
   if (collapsedTradeSections.has(key)) collapsedTradeSections.delete(key); else collapsedTradeSections.add(key);
   renderTrades();
 }
@@ -1903,11 +2124,17 @@ function renderTrades() {
 
   function renderPersonCard(name) {
     const person = state.people[name];
-    const haveItems = personHaveItems(name);
-    const giveItems = personGiveItems(name);
+    const lists = personTradeLists(name);
+    if (!activeListByPerson[name] || !lists.some(l => l.id === activeListByPerson[name])) {
+      activeListByPerson[name] = lists[0].id;
+    }
+    const activeListId = activeListByPerson[name];
+    const activeList = lists.find(l => l.id === activeListId) || lists[0];
+    const haveItems = personHaveItems(name, activeListId);
+    const giveItems = personGiveItems(name, activeListId);
     const special = personSpecialDeal(name);
     const { total, done } = personTradeTotals(name);
-    const { reciboCount, doyCount } = countTradeStickers(name);
+    const { reciboCount, doyCount } = countTradeStickers(name, activeListId);
 
     const meet = meetInfo[name] || {};
     const meetPlace = meet.place !== undefined ? meet.place : person.meetPoint;
@@ -1915,13 +2142,13 @@ function renderTrades() {
     const meetTime = meet.time || '';
 
     const isCollapsed = collapsedPeople.has(name);
-    let html = `<div class="person-card" data-person-name="${name.replace(/"/g, '&quot;')}">
+    let html = `<div class="person-card" data-person-name="${name.replace(/"/g, '&quot;')}" data-active-list="${activeListId.replace(/"/g, '&quot;')}">
       <div class="person-head">
         <div class="drag-handle" title="Arrastrar para reordenar">⠿</div>
         <div><div class="person-name">${name}</div><div class="person-meta">${person.location}</div></div>
         <div class="progress-chip">${done}/${total}</div>
         <button type="button" class="edit-person-btn" title="Editar lo que tiene/necesita esta persona en Base de Datos" onclick="editPersonFromTrades(this.closest('.person-card').dataset.personName)">✎ Editar</button>
-        <button type="button" class="edit-person-btn" title="Copiar un resumen en texto del trato para mandarlo por mensaje" onclick="exportTradeSummary(this.closest('.person-card').dataset.personName)">📋 Copiar resumen</button>
+        <button type="button" class="edit-person-btn" title="Copiar un resumen en texto del trato de la lista activa para mandarlo por mensaje" onclick="exportTradeSummary(this.closest('.person-card').dataset.personName, this.closest('.person-card').dataset.activeList)">📋 Copiar resumen</button>
         <button type="button" class="collapse-toggle" title="${isCollapsed ? 'Mostrar intercambios' : 'Ocultar intercambios'}" onclick="togglePersonCollapse(this.closest('.person-card').dataset.personName)">${isCollapsed ? '▸' : '▾'}</button>
         <div class="meet-edit-row">
           <div class="meet-field"><label>Fecha</label><input type="date" data-person="${name}" value="${meetDate}" onchange="updateMeet(this,'date')" />${!meetDate ? '<span class="meet-undefined">Sin definir</span>' : ''}</div>
@@ -1935,7 +2162,22 @@ function renderTrades() {
         html += `<div style="padding:10px 16px 0"><div style="font-weight:700;font-size:11px;color:#C00000;font-family:'Barlow Condensed',sans-serif">⏸️ AVISO</div>
           <div style="font-size:12.5px;padding:4px 0 10px">${person.conflicto}</div></div>`;
       }
-      if (total > 0) {
+      html += renderSpecialDealSection(special, name);
+
+      const escName = name.replace(/'/g, "\\'");
+      html += `<div class="trade-list-tabs">`;
+      for (const list of lists) {
+        const isActive = list.id === activeListId;
+        html += `<button type="button" class="trade-list-tab ${isActive ? 'active' : ''}" onclick="switchPersonList('${escName}','${list.id}')">${list.name}</button>`;
+      }
+      html += `<button type="button" class="trade-list-tab-add" title="Crear una nueva lista de intercambio con ${name.split(' ')[0]}" onclick="addTradeList('${escName}')">+ Nueva lista</button>`;
+      html += `<button type="button" class="trade-list-tab-action" title="Renombrar la lista «${activeList.name}»" onclick="renameTradeList('${escName}','${activeListId}')">✎ Renombrar</button>`;
+      if (lists.length > 1) {
+        html += `<button type="button" class="trade-list-tab-action" title="Borrar la lista «${activeList.name}»" onclick="removeTradeList('${escName}','${activeListId}')">✕ Borrar lista</button>`;
+      }
+      html += `</div>`;
+
+      if (reciboCount > 0 || doyCount > 0) {
         html += `<div class="trade-row trade-row-header">
           <div></div><div></div>
           <div class="col-label">📥 ${name.split(' ')[0]} entrega — <b>${reciboCount}</b> sticker${reciboCount === 1 ? '' : 's'}</div>
@@ -1943,25 +2185,24 @@ function renderTrades() {
           <div class="col-label">📤 Daniel entrega — <b>${doyCount}</b> sticker${doyCount === 1 ? '' : 's'}</div>
         </div>`;
       }
-      html += renderSpecialDealSection(special, name);
 
-      html += tradeSectionHeaderHtml(name, 'programmed', '📋 Intercambio programado — confirmá lo que realmente se entregó/recibió');
-      if (!isTradeSectionCollapsed(name, 'programmed')) {
-        html += renderProgrammedItemsHtml(name);
+      html += tradeSectionHeaderHtml(name, activeListId, 'programmed', '📋 Intercambio programado — confirmá lo que realmente se entregó/recibió');
+      if (!isTradeSectionCollapsed(name, activeListId, 'programmed')) {
+        html += renderProgrammedItemsHtml(name, activeListId);
       }
 
-      html += tradeSectionHeaderHtml(name, 'preliminary', '🗂️ Lista preliminar — elegí qué sumar al intercambio');
-      if (!isTradeSectionCollapsed(name, 'preliminary')) {
+      html += tradeSectionHeaderHtml(name, activeListId, 'preliminary', '🗂️ Lista preliminar — elegí qué sumar al intercambio');
+      if (!isTradeSectionCollapsed(name, activeListId, 'preliminary')) {
         html += `<div class="two-col-trade">
           <div class="trade-col">
             <h4 class="trade-col-title">📥 Recibís (tiene ${name.split(' ')[0]})</h4>
-            ${renderItemSection(name, 'have', haveItems.useful, '✅ Lo que sí me sirve', false)}
-            ${renderItemSection(name, 'have', haveItems.filler, '🟣 Lo que no me sirve', true)}
+            ${renderItemSection(name, activeListId, 'have', haveItems.useful, '✅ Lo que sí me sirve', false)}
+            ${renderItemSection(name, activeListId, 'have', haveItems.filler, '🟣 Lo que no me sirve', true)}
           </div>
           <div class="trade-col">
             <h4 class="trade-col-title">📤 Doy (tengo yo)</h4>
-            ${renderItemSection(name, 'give', giveItems.useful, '✅ Lo que sí le sirve', false)}
-            ${renderItemSection(name, 'give', giveItems.filler, '🟣 Lo que no le sirve', true)}
+            ${renderItemSection(name, activeListId, 'give', giveItems.useful, '✅ Lo que sí le sirve', false)}
+            ${renderItemSection(name, activeListId, 'give', giveItems.filler, '🟣 Lo que no le sirve', true)}
           </div>
         </div>`;
       }
@@ -2394,7 +2635,7 @@ function createNewPerson() {
   const location = document.getElementById('newPersonLocation').value.trim();
   if (!name) { alert('Escribe un nombre'); return; }
   if (state.people[name]) { alert('Ya existe una persona con ese nombre'); return; }
-  state.people[name] = { location, meetPoint: 'Por definir', notas: '', conflicto: null, specialDeal: null, have: {}, need: {} };
+  state.people[name] = { location, meetPoint: 'Por definir', notas: '', conflicto: null, specialDeal: null, tradeLists: defaultTradeLists(), have: {}, need: {} };
   document.getElementById('newPersonName').value = '';
   document.getElementById('newPersonLocation').value = '';
   openPersonName = name;
