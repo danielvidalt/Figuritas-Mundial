@@ -1687,12 +1687,17 @@ function computeStockConflicts() {
   const usage = {};
   for (const name of Object.keys(state.people)) {
     const { special, pairs } = getMatches(name);
-    const bump = (key, pairId) => {
-      if (!key) return;
+    // Sólo cuenta lo PENDIENTE (sin marcar ✓): un trato ya completado no es
+    // un conflicto a resolver, ya pasó — y "Ya no disponibles" ya avisa
+    // cuando eso deja bloqueado algo pendiente. Esto se recalcula solo en
+    // cada render, así que se actualiza en tiempo real apenas se marca o
+    // desmarca algo, o cambia el stock.
+    const bump = (key, id) => {
+      if (!key || checked.has(id)) return;
       if (!usage[key]) usage[key] = { count: 0, people: new Set(), occurrences: [] };
       usage[key].count++;
       usage[key].people.add(name);
-      usage[key].occurrences.push({ personName: name, pairId });
+      usage[key].occurrences.push({ personName: name, pairId: id });
     };
     for (const s of special) bump(stickerDisplay(s.doy_code, s.doy_num), s.id);
     for (const pr of pairs) bump(effectiveDoy(pr), pr.id);
@@ -1700,7 +1705,10 @@ function computeStockConflicts() {
   const conflicts = [];
   for (const key in usage) {
     const { code, num } = codeNumFromKey(key);
-    const total = tengoQty(code, num);
+    // Stock real que queda para repartir entre lo pendiente: el total menos
+    // lo que ya se entregó de verdad en tratos confirmados.
+    const alreadyGiven = usedCountFor(key, '');
+    const total = tengoQty(code, num) - alreadyGiven;
     if (usage[key].count > total) {
       conflicts.push({ key, total, used: usage[key].count, people: [...usage[key].people], occurrences: usage[key].occurrences });
     }
@@ -1840,7 +1848,7 @@ function doyLiveStockNoteHtml(key, currentPersonName) {
   if (conflict) {
     const others = conflict.people.filter(p => p !== currentPersonName);
     const withWho = others.length ? ` con ${others.join(', ')}` : '';
-    return ` <span class="live-stock-note conflict">⚠ Conflicto de stock${withWho} — tenés ${conflict.total}, comprometido ${conflict.used} veces</span>`;
+    return ` <span class="live-stock-note conflict">⚠ Conflicto de stock${withWho} — tenés ${conflict.total} disponible${conflict.total === 1 ? '' : 's'}, comprometido ${conflict.used} veces</span>`;
   }
   const { code, num } = codeNumFromKey(key);
   const total = tengoQty(code, num);
@@ -2462,7 +2470,7 @@ function renderTrades() {
   } else if (stockPanelMode === 'conflicts') {
     statusPanelHtml = `<div class="status-panel">
       ${stockConflicts.length
-        ? `<ul>${stockConflicts.map(c => stockPanelItemHtml('conflicts', c.key, c.occurrences, `comprometido ${c.used} ${c.used === 1 ? 'vez' : 'veces'}, tenés ${c.total}`)).join('')}</ul>`
+        ? `<ul>${stockConflicts.map(c => stockPanelItemHtml('conflicts', c.key, c.occurrences, `comprometido ${c.used} ${c.used === 1 ? 'vez' : 'veces'}, tenés ${c.total} disponible${c.total === 1 ? '' : 's'}`)).join('')}</ul>`
         : `<p class="status-panel-empty">No hay conflictos de stock entre personas.</p>`}
     </div>`;
   }
