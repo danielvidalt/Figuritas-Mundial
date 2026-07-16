@@ -1060,7 +1060,7 @@ function computeSaleMatches(buyer) {
 // ============================================================================
 // ESTADO
 // ============================================================================
-var state = { tengo: {}, necesito: {}, people: {}, sales: [], premium: {} };
+var state = { tengo: {}, necesito: {}, people: {}, sales: [], premium: {}, receivedMigrated: false };
 // Dos etapas: `selected` es la lista PRELIMINAR (qué sticker se suma al
 // intercambio que se va a hacer, elegido de todo lo útil/relleno de cada
 // persona); `checked` ahora es la confirmación real dentro del "Intercambio
@@ -1218,6 +1218,19 @@ function migrateValueOverrideKeys() {
   valueOverrides = result;
   return changed;
 }
+// Antes de que existiera adjustTengoQty, confirmar un "recibo" (o un Trato
+// Especial) no sumaba nada a Mi Inventario — esto suma retroactivamente,
+// una sola vez, todo lo que ya estaba confirmado como recibido para que el
+// inventario quede consistente con lo que ya se había registrado.
+function migrateReceivedIntoInventory() {
+  if (state.receivedMigrated) return false;
+  for (const id of checked) {
+    const received = receivedStickerFromId(id);
+    if (received) adjustTengoQty(received.code, received.num, 1);
+  }
+  state.receivedMigrated = true;
+  return true;
+}
 
 // ============================================================================
 // CARGA / GUARDADO
@@ -1232,6 +1245,7 @@ async function loadAll() {
       state.people = saved.people || {};
       state.sales = saved.sales || [];
       state.premium = saved.premium || JSON.parse(JSON.stringify(SEED.premium));
+      state.receivedMigrated = saved.receivedMigrated || false;
     } else {
       throw new Error('sin datos guardados aún');
     }
@@ -1241,6 +1255,7 @@ async function loadAll() {
     state.people = JSON.parse(JSON.stringify(SEED.people));
     state.sales = JSON.parse(JSON.stringify(SEED.sales));
     state.premium = JSON.parse(JSON.stringify(SEED.premium));
+    state.receivedMigrated = false;
     await saveDbState();
   }
 
@@ -1281,6 +1296,11 @@ async function loadAll() {
   if (migrateValueOverrideKeys()) trackingChanged = true;
   if (trackingChanged) await saveTrackingState();
 
+  // Suma retroactivamente a Mi Inventario lo que ya estaba confirmado como
+  // recibido antes de que existiera este conteo — necesita `checked` ya
+  // cargado y migrado al formato con listId, por eso va acá al final.
+  if (migrateReceivedIntoInventory()) await saveDbState();
+
   loaded = true;
   renderAll();
 }
@@ -1289,6 +1309,7 @@ async function saveDbState() {
   try {
     await window.storage.set('panini-db-state', JSON.stringify({
       tengo: state.tengo, necesito: state.necesito, people: state.people, sales: state.sales, premium: state.premium,
+      receivedMigrated: state.receivedMigrated,
     }), false);
   } catch (e) { console.error('No se pudo guardar la base de datos', e); }
 }
@@ -1504,9 +1525,43 @@ function switchDbSub(sub) {
 // ============================================================================
 // TOGGLE / CHECK
 // ============================================================================
+// Suma (delta=1) o resta (delta=-1) copias en Mi Inventario (state.tengo) —
+// se usa cuando se confirma/desconfirma un sticker RECIBIDO, sin importar si
+// era algo que necesitaba o pura ayuda a la otra persona: cualquier sticker
+// que entra a mis manos pasa a estar disponible para futuros intercambios.
+function adjustTengoQty(code, num, delta) {
+  if (!state.tengo[code]) state.tengo[code] = {};
+  const key = String(num);
+  const next = (state.tengo[code][key] || 0) + delta;
+  if (next > 0) state.tengo[code][key] = next;
+  else delete state.tengo[code][key];
+  if (Object.keys(state.tengo[code]).length === 0) delete state.tengo[code];
+}
+// A partir de un id de confirmación, qué sticker gano en Mi Inventario si se
+// acaba de confirmar como recibido — el lado "recibo" de un have normal, o
+// el lado "recibo" del Trato Especial (que no queda codificado en su id,
+// hay que buscarlo en specialDeal). null si el id no representa un recibo
+// (lado "doy", ventas).
+function receivedStickerFromId(id) {
+  const parts = id.split('::');
+  if (parts.length === 4 && parts[2] === 'have') {
+    const sp = parts[3].lastIndexOf(' ');
+    return { code: parts[3].slice(0, sp), num: parseInt(parts[3].slice(sp + 1), 10) };
+  }
+  if (parts.length === 3 && parts[1] === 'special') {
+    const special = state.people[parts[0]] && state.people[parts[0]].specialDeal;
+    if (special) return { code: special.recibo_code, num: special.recibo_num };
+  }
+  return null;
+}
 function toggle(id) {
   const turningOn = !checked.has(id);
   if (turningOn) checked.add(id); else checked.delete(id);
+  const received = receivedStickerFromId(id);
+  if (received) {
+    adjustTengoQty(received.code, received.num, turningOn ? 1 : -1);
+    saveDbState();
+  }
   saveTrackingState();
   renderAll();
   if (turningOn) {
@@ -1521,9 +1576,13 @@ function toggle(id) {
 // de stock, ver selectAllRowHtml) — para no tener que ir uno por uno cuando
 // ya se sabe que todo el trato se cumplió tal cual.
 function toggleAllChecked(personName, ids, on) {
+  let dbChanged = false;
   for (const id of ids) {
     if (on) checked.add(id); else checked.delete(id);
+    const received = receivedStickerFromId(id);
+    if (received) { adjustTengoQty(received.code, received.num, on ? 1 : -1); dbChanged = true; }
   }
+  if (dbChanged) saveDbState();
   saveTrackingState();
   renderAll();
   if (on && state.people[personName] && isPersonComplete(personName)) {
