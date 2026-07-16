@@ -336,6 +336,21 @@
     background: var(--green-check); color: #fff; border: none; border-radius: 8px; padding: 10px 28px; cursor: pointer;
   }
   .modal-btn:hover { background: #256b41; }
+  .modal-box.wide { max-width: 420px; }
+  .summary-modal-options {
+    display: flex; flex-direction: column; gap: 10px; text-align: left; margin-bottom: 20px;
+  }
+  .summary-modal-options label {
+    display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); cursor: pointer;
+  }
+  .summary-modal-options input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--green-check); cursor: pointer; }
+  .modal-btn-row { display: flex; gap: 10px; justify-content: center; }
+  .modal-btn-cancel {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px; text-transform: uppercase;
+    background: transparent; color: var(--muted); border: 1px solid var(--paper-line); border-radius: 8px;
+    padding: 10px 20px; cursor: pointer;
+  }
+  .modal-btn-cancel:hover { border-color: var(--red); color: var(--red); }
   .trade-row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--green-check); cursor: pointer; margin-top: 2px; }
   .trade-row input[type=checkbox]:disabled { cursor: not-allowed; }
   .sticker-block { min-width: 0; }
@@ -604,6 +619,22 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="inventorySummaryModalOverlay" style="display:none">
+  <div class="modal-box wide">
+    <div class="modal-title">📋 Resumen Inventario</div>
+    <div class="modal-text">Elegí qué incluir en el texto a copiar:</div>
+    <div class="summary-modal-options">
+      <label><input type="checkbox" id="summaryOptTotal" checked /> Resumen de Inventario Total</label>
+      <label><input type="checkbox" id="summaryOptFaltantes" /> Láminas Faltantes</label>
+      <label><input type="checkbox" id="summaryOptIntercambio" /> Láminas para Intercambio</label>
+    </div>
+    <div class="modal-btn-row">
+      <button class="modal-btn" onclick="exportInventorySummarySelection()">Copiar resumen</button>
+      <button class="modal-btn-cancel" onclick="closeInventorySummaryModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <script>
@@ -703,6 +734,11 @@ function baseBucket(code, num) {
   if (cat === 'Especial FWC') return `Especial FWC | ${code}`;
   return cat;
 }
+
+// Total de láminas únicas del álbum (usado sólo para calcular cuántas ya
+// están pegadas: total - faltantes realmente pendientes) — no confundir con
+// la cantidad de copias que se pueden tener de cada una.
+const ALBUM_TOTAL_STICKERS = 980;
 
 // Subdivide la lista de intercambio de cada persona en secciones legibles
 // (Especiales / Destacados / Holograma / Foto equipo / Normales), en base al
@@ -2521,6 +2557,101 @@ function refreshNecesitoList() {
   document.getElementById('necesitoSubtotal').innerHTML = buildNecesitoSubtotalHtml();
   document.getElementById('necesitoListContainer').innerHTML = buildNecesitoListHtml();
 }
+
+// ============================================================================
+// RESUMEN INVENTARIO — modal con checkboxes (Resumen Total / Faltantes /
+// Para Intercambio) para armar un solo texto combinado a copiar. Usa los
+// mismos datos "sin filtrar" de tengoFilteredRows/necesitoFilteredRows (los
+// filtros de búsqueda de cada lista no afectan a este resumen general).
+// ============================================================================
+// Cuenta base para las tres opciones. Una lámina "necesito" que ya se
+// recibió en un trato confirmado (pero todavía no se sacó a mano de la
+// lista) cuenta como ya pegada en el álbum, no como faltante — mismo
+// criterio que ya usa la sección "✅ Ya conseguidos" de Necesito.
+function inventorySummaryCounts() {
+  const { all: tengoAll } = tengoFilteredRows();
+  const tradeCopies = tengoAll.reduce((a, r) => a + r.qty, 0);
+  const { all: necesitoAll } = necesitoFilteredRows();
+  const trulyMissing = necesitoAll.filter(r => receivedCountFor(stickerDisplay(r.code, r.num)) === 0);
+  const missingCount = trulyMissing.length;
+  const pastedCount = ALBUM_TOTAL_STICKERS - missingCount;
+  return { pastedCount, tradeCopies, missingCount, tengoAll, trulyMissing };
+}
+// Agrupa filas {code,num,...} por sección (Especiales/Destacados/Holograma/
+// Foto/Normales), cada grupo ordenado alfabéticamente y por número — mismo
+// criterio de orden que ya usa buildTengoSummaryText.
+function groupRowsByTradeSection(rows) {
+  const bySection = {};
+  for (const r of rows) {
+    const secKey = sectionKeyOf(bucketOfKey(stickerDisplay(r.code, r.num)));
+    (bySection[secKey] = bySection[secKey] || []).push(r);
+  }
+  for (const key in bySection) bySection[key].sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
+  return bySection;
+}
+function tradeSectionDetailLines(rows, itemLineFn) {
+  const bySection = groupRowsByTradeSection(rows);
+  const lines = [];
+  for (const sec of TRADE_SECTIONS) {
+    const items = bySection[sec.key];
+    if (!items || !items.length) continue;
+    lines.push(`${sec.label}:`);
+    for (const r of items) lines.push(itemLineFn(r));
+    lines.push('');
+  }
+  return lines;
+}
+function buildInventorySummaryTotalText() {
+  const { pastedCount, tradeCopies, missingCount } = inventorySummaryCounts();
+  return [
+    'Resumen de Inventario:',
+    `Láminas pegadas en el álbum: ${pastedCount} de ${ALBUM_TOTAL_STICKERS}`,
+    `Láminas Repetidas para intercambiar: ${tradeCopies}`,
+    `Láminas que Necesito: ${missingCount}`,
+  ].join('\n');
+}
+function buildInventoryFaltantesText() {
+  const { missingCount, trulyMissing } = inventorySummaryCounts();
+  const lines = [`Láminas Faltantes: ${missingCount}`, ''];
+  lines.push(...tradeSectionDetailLines(trulyMissing, r => keyWithPlayerName(stickerDisplay(r.code, r.num))));
+  return lines.join('\n').trim();
+}
+function buildInventoryTradeText() {
+  const { tengoAll, tradeCopies } = inventorySummaryCounts();
+  const available = tengoAll.filter(r => r.qty > 0);
+  const lines = [`Láminas Para intercambio: ${tradeCopies}`, ''];
+  lines.push(...tradeSectionDetailLines(available, r => `${keyWithPlayerName(stickerDisplay(r.code, r.num))}${r.qty > 1 ? ` x${r.qty}` : ''}`));
+  return lines.join('\n').trim();
+}
+function openInventorySummaryModal() {
+  document.getElementById('inventorySummaryModalOverlay').style.display = 'flex';
+}
+function closeInventorySummaryModal() {
+  document.getElementById('inventorySummaryModalOverlay').style.display = 'none';
+}
+function exportInventorySummarySelection() {
+  const wantTotal = document.getElementById('summaryOptTotal').checked;
+  const wantFaltantes = document.getElementById('summaryOptFaltantes').checked;
+  const wantIntercambio = document.getElementById('summaryOptIntercambio').checked;
+  if (!wantTotal && !wantFaltantes && !wantIntercambio) {
+    alert('Elegí al menos una opción para el resumen.');
+    return;
+  }
+  const parts = [];
+  if (wantTotal) parts.push(buildInventorySummaryTotalText());
+  if (wantFaltantes) parts.push(buildInventoryFaltantesText());
+  if (wantIntercambio) parts.push(buildInventoryTradeText());
+  const text = parts.join('\n\n');
+  closeInventorySummaryModal();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => alert('✅ Resumen copiado al portapapeles. Ya lo podés pegar donde quieras enviarlo.'),
+      () => prompt('No se pudo copiar automáticamente. Copiá el texto manualmente:', text)
+    );
+  } else {
+    prompt('Copiá el texto manualmente:', text);
+  }
+}
 function onTengoFilterInput(el) {
   tengoFilter = el.value;
   refreshTengoList();
@@ -2666,6 +2797,9 @@ function renderDbInventario() {
   const tengoCount = Object.values(state.tengo).reduce((a, o) => a + Object.keys(o).length, 0);
   const necesitoCount = Object.values(state.necesito).reduce((a, arr) => a + arr.length, 0);
   el.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+      <button type="button" class="db-export-btn" title="Elegí qué resumen de tu inventario querés copiar en texto" onclick="openInventorySummaryModal()">📋 Resumen Inventario</button>
+    </div>
     <div class="db-section">
       <div class="db-section-title-row">
         <h2>Tengo para intercambiar <span style="color:var(--muted);font-size:13px">(${tengoCount})</span></h2>
