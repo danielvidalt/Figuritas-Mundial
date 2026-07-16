@@ -527,6 +527,22 @@
     .trade-row { grid-template-columns: 14px 22px 1fr 16px 1fr; padding: 10px 12px; gap: 6px; }
     .sticker-code { font-size: 14px; }
   }
+
+  #navFloater {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 8px; z-index: 9999;
+    background: var(--pitch-dark); color: #fff; padding: 8px 10px 8px 14px; border-radius: 999px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.35); font-family: 'Inter', sans-serif; font-size: 13px;
+    max-width: 92vw;
+  }
+  #navFloater .nav-floater-key { font-weight: 700; font-family: 'Barlow Condensed', sans-serif; white-space: nowrap; }
+  #navFloater .nav-floater-page { color: var(--gold-soft); font-weight: 600; white-space: nowrap; }
+  #navFloater button {
+    background: rgba(255,255,255,0.15); border: none; color: #fff; border-radius: 999px;
+    width: 26px; height: 26px; flex-shrink: 0; cursor: pointer; font-size: 12px;
+  }
+  #navFloater button:hover { background: rgba(255,255,255,0.3); }
+  #navFloater .nav-floater-exit { width: auto; padding: 0 12px; font-weight: 700; font-family: 'Barlow Condensed', sans-serif; text-transform: uppercase; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -914,6 +930,10 @@ var stockPanelMode = null;
 var navIndexByKey = {};
 var _blockedOccByKey = {};
 var _conflictOccByKey = {};
+// Sticker que se está revisando con el control flotante de navegación
+// (aparece al hacer clic en un ítem del panel "Ya no disponibles"/
+// "Conflictos de Stock") — null = no hay ninguno activo.
+var activeNav = null;
 
 function pairSignature(p) {
   return `${p.recibo_code}|${p.recibo_num}|${p.doy_code}|${p.doy_num}`;
@@ -1294,6 +1314,7 @@ function renderAll() {
   renderDbInventario();
   renderDbPersonas();
   renderDbVentas();
+  renderNavFloater();
 
   window.scrollTo(0, winY);
   for (const id in listScrolls) {
@@ -1316,6 +1337,7 @@ function switchTab(tab) {
   document.getElementById('summaryBar').style.display = tab === 'trades' ? 'flex' : 'none';
   document.getElementById('footerText').style.display = tab === 'trades' ? 'block' : 'none';
   updateHeaderHeightVar();
+  renderNavFloater();
 }
 
 function switchDbSub(sub) {
@@ -1729,6 +1751,7 @@ function navigateToTradeRow(mode, key, delta) {
   const n = occurrences.length;
   const idx = (((navIndexByKey[mapKey] || 0) + delta) % n + n) % n;
   navIndexByKey[mapKey] = idx;
+  activeNav = { mode, key };
   const occ = occurrences[idx];
   collapsedPeople.delete(occ.personName);
   renderAll();
@@ -1739,6 +1762,45 @@ function navigateToTradeRow(mode, key, delta) {
     el.classList.add('row-flash');
     setTimeout(() => el.classList.remove('row-flash'), 1800);
   });
+}
+// Sale del modo de revisión: oculta el control flotante de navegación sin
+// tocar el panel de arriba (que sigue abierto si lo estaba).
+function exitNavMode() {
+  activeNav = null;
+  renderNavFloater();
+}
+// Control flotante y FIJO en pantalla (no se va al hacer scroll) con
+// "◀ N/M ▶" para seguir navegando entre las listas donde aparece el
+// sticker que se está revisando, sin tener que volver arriba al panel cada
+// vez — y un botón para salir de este modo.
+function renderNavFloater() {
+  let el = document.getElementById('navFloater');
+  if (!activeNav || currentTab !== 'trades') {
+    if (el) el.remove();
+    return;
+  }
+  const { mode, key } = activeNav;
+  const occurrences = (mode === 'blocked' ? _blockedOccByKey : _conflictOccByKey)[key] || [];
+  if (!occurrences.length) {
+    activeNav = null;
+    if (el) el.remove();
+    return;
+  }
+  const idx = navIndexByKey[`${mode}|${key}`] || 0;
+  const n = occurrences.length;
+  const escKey = key.replace(/'/g, "\\'");
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'navFloater';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `
+    <span class="nav-floater-key">${key}</span>
+    <button type="button" title="Anterior" onclick="navigateToTradeRow('${mode}','${escKey}',-1)">◀</button>
+    <span class="nav-floater-page">${idx + 1}/${n}</span>
+    <button type="button" title="Siguiente" onclick="navigateToTradeRow('${mode}','${escKey}',1)">▶</button>
+    <button type="button" class="nav-floater-exit" onclick="exitNavMode()">✕ Salir</button>
+  `;
 }
 function stockPanelItemHtml(mode, key, occurrences, extraLabel) {
   const n = occurrences.length;
