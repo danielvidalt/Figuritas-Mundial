@@ -67,19 +67,37 @@
     align-items: center;
     gap: 6px;
   }
-  .pill.warn { border-color: rgba(240,196,25,0.6); color: var(--gold-soft); }
-  .pill.danger { border-color: rgba(179,38,30,0.7); color: #ffb4ae; }
   .pill b { font-family: 'Archivo Black', sans-serif; font-weight: 400; }
 
-  .stock-conflict-banner {
+  .status-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .status-tab {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase;
+    background: #fff; border: 1px solid var(--paper-line); border-radius: 999px; padding: 6px 14px; cursor: pointer;
+    color: var(--pitch-dark);
+  }
+  .status-tab:hover { border-color: var(--pitch); }
+  .status-tab.active { background: var(--red-soft); border-color: var(--red); color: var(--red); }
+  .status-panel {
     background: var(--red-soft); border: 1px solid var(--red); border-radius: var(--card-radius);
     padding: 12px 16px; margin-bottom: 16px; font-size: 12.5px; color: var(--ink);
   }
-  .stock-conflict-banner h3 {
-    font-family: 'Barlow Condensed', sans-serif; font-size: 15px; margin: 0 0 8px; color: var(--red);
+  .status-panel ul { list-style: none; margin: 0; padding: 0; }
+  .status-panel-empty { margin: 0; color: var(--muted); }
+  .status-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px dashed rgba(179,38,30,0.25); }
+  .status-item:last-child { border-bottom: none; }
+  .status-item-btn {
+    flex: 1; text-align: left; background: none; border: none; cursor: pointer; padding: 0;
+    font-family: 'Inter', sans-serif; font-size: 12.5px; color: var(--ink);
   }
-  .stock-conflict-banner ul { margin: 0; padding-left: 18px; }
-  .stock-conflict-banner li { margin-bottom: 4px; line-height: 1.4; }
+  .status-item-btn:hover { text-decoration: underline; }
+  .status-item .nav-page { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .status-item .nav-arrow {
+    border: 1px solid var(--red); background: #fff; color: var(--red); border-radius: 999px;
+    width: 20px; height: 20px; line-height: 1; cursor: pointer; font-size: 10px;
+  }
+  .status-item .nav-arrow:hover { background: var(--red); color: #fff; }
+  @keyframes rowFlash { 0% { background: var(--gold-soft); } 100% { background: transparent; } }
+  .trade-item.row-flash { animation: rowFlash 1.8s ease; border-radius: var(--card-radius); }
 
   .tabs { display: flex; gap: 4px; }
   .tab-btn {
@@ -889,6 +907,13 @@ let rowSortableInstances = [];
 let explodeSortableInstances = [];
 var explodedPeople = new Set();
 var pendingCompletePerson = null;
+// Pestañas de estado arriba de Intercambios ("Ya no disponibles" /
+// "Conflictos de Stock"): null = ningún panel abierto, o el modo activo.
+// No se persiste — es sólo de la sesión actual, como un filtro de vista.
+var stockPanelMode = null;
+var navIndexByKey = {};
+var _blockedOccByKey = {};
+var _conflictOccByKey = {};
 
 function pairSignature(p) {
   return `${p.recibo_code}|${p.recibo_num}|${p.doy_code}|${p.doy_num}`;
@@ -1640,25 +1665,92 @@ function computeStockConflicts() {
   const usage = {};
   for (const name of Object.keys(state.people)) {
     const { special, pairs } = getMatches(name);
-    const bump = key => {
+    const bump = (key, pairId) => {
       if (!key) return;
-      if (!usage[key]) usage[key] = { count: 0, people: new Set() };
+      if (!usage[key]) usage[key] = { count: 0, people: new Set(), occurrences: [] };
       usage[key].count++;
       usage[key].people.add(name);
+      usage[key].occurrences.push({ personName: name, pairId });
     };
-    for (const s of special) bump(stickerDisplay(s.doy_code, s.doy_num));
-    for (const pr of pairs) bump(effectiveDoy(pr));
+    for (const s of special) bump(stickerDisplay(s.doy_code, s.doy_num), s.id);
+    for (const pr of pairs) bump(effectiveDoy(pr), pr.id);
   }
   const conflicts = [];
   for (const key in usage) {
     const { code, num } = codeNumFromKey(key);
     const total = tengoQty(code, num);
     if (usage[key].count > total) {
-      conflicts.push({ key, total, used: usage[key].count, people: [...usage[key].people] });
+      conflicts.push({ key, total, used: usage[key].count, people: [...usage[key].people], occurrences: usage[key].occurrences });
     }
   }
   conflicts.sort((a, b) => a.key.localeCompare(b.key));
   return conflicts;
+}
+// Devuelve, para cada sticker mío (lado doy) que ya no está disponible en
+// alguna fila PENDIENTE (se usó/confirmó en otro intercambio), todas las
+// filas afectadas — para poder navegar entre ellas si aparece en más de
+// una lista.
+function computeBlockedOccurrences() {
+  const byKey = {};
+  for (const name of Object.keys(state.people)) {
+    const { special, pairs } = getMatches(name);
+    const consider = (item, key) => {
+      if (!key || checked.has(item.id)) return;
+      const used = usedCountFor(key, item.id);
+      const { remaining } = stockRemainingText(key, used);
+      if (remaining <= 0) {
+        if (!byKey[key]) byKey[key] = [];
+        byKey[key].push({ personName: name, pairId: item.id });
+      }
+    };
+    for (const s of special) consider(s, stickerDisplay(s.doy_code, s.doy_num));
+    for (const pr of pairs) consider(pr, effectiveDoy(pr));
+  }
+  return byKey;
+}
+// Abre/cierra el panel de detalle debajo de las pestañas de estado — hace
+// toggle si ya estaba en ese modo, para poder cerrarlo con un segundo clic.
+function toggleStockPanel(mode) {
+  stockPanelMode = stockPanelMode === mode ? null : mode;
+  renderTrades();
+}
+function scrollToCompleted() {
+  const el = document.querySelector('.group-header.completed');
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+// Navega a la fila afectada por un sticker bloqueado/en conflicto. `delta`
+// mueve el índice dentro de las apariciones de ese sticker (0 = quedarse en
+// la actual, 1 = la siguiente) — así "1/2 ▶" va rotando entre las listas
+// donde aparece sin perder el lugar.
+function navigateToTradeRow(mode, key, delta) {
+  const occurrences = (mode === 'blocked' ? _blockedOccByKey : _conflictOccByKey)[key] || [];
+  if (!occurrences.length) return;
+  const mapKey = `${mode}|${key}`;
+  const n = occurrences.length;
+  const idx = (((navIndexByKey[mapKey] || 0) + delta) % n + n) % n;
+  navIndexByKey[mapKey] = idx;
+  const occ = occurrences[idx];
+  collapsedPeople.delete(occ.personName);
+  renderAll();
+  requestAnimationFrame(() => {
+    const el = document.querySelector(`[data-row-id="${CSS.escape(occ.pairId)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('row-flash');
+    setTimeout(() => el.classList.remove('row-flash'), 1800);
+  });
+}
+function stockPanelItemHtml(mode, key, occurrences, extraLabel) {
+  const n = occurrences.length;
+  const idx = navIndexByKey[`${mode}|${key}`] || 0;
+  const escKey = key.replace(/'/g, "\\'");
+  const pageControl = n > 1
+    ? `<span class="nav-page">${idx + 1}/${n}</span><button type="button" class="nav-arrow" title="Ir a la siguiente lista donde aparece" onclick="event.stopPropagation(); navigateToTradeRow('${mode}','${escKey}',1)">▶</button>`
+    : '';
+  return `<li class="status-item">
+      <button type="button" class="status-item-btn" onclick="navigateToTradeRow('${mode}','${escKey}',0)"><b>${key}</b> — ${extraLabel}</button>
+      ${pageControl}
+    </li>`;
 }
 // Mapa key -> conflicto, calculado una sola vez por render (computeStockConflicts
 // recorre a TODAS las personas, así que no conviene llamarlo por cada fila).
@@ -2279,17 +2371,37 @@ function computeSummary() {
 }
 
 function renderTrades() {
-  const { totalTrades, doneTrades, blockedTrades } = computeSummary();
-  const stockConflicts = computeStockConflicts();
+  const { totalTrades, doneTrades } = computeSummary();
   document.getElementById('summaryBar').innerHTML = `
-    <div class="pill">✓ <b>${doneTrades}</b>/${totalTrades} intercambios hechos</div>
-    ${blockedTrades > 0 ? `<div class="pill warn">⚠ <b>${blockedTrades}</b> bloqueados por falta de stock</div>` : ''}
-    ${stockConflicts.length > 0 ? `<div class="pill danger">🔴 <b>${stockConflicts.length}</b> conflicto${stockConflicts.length === 1 ? '' : 's'} de stock entre personas</div>` : ''}`;
+    <div class="pill">✓ <b>${doneTrades}</b>/${totalTrades} intercambios hechos</div>`;
 
-  const conflictBannerHtml = stockConflicts.length ? `<div class="stock-conflict-banner">
-    <h3>🔴 Conflictos de stock compartido — resolvé a mano</h3>
-    <ul>${stockConflicts.map(c => `<li><b>${c.key}</b>: comprometido ${c.used} ${c.used === 1 ? 'vez' : 'veces'} pero tenés ${c.total} — entre: ${c.people.join(', ')}. Cambiá el sticker o eliminá la fila en alguno de esos intercambios.</li>`).join('')}</ul>
-  </div>` : '';
+  const blockedOcc = computeBlockedOccurrences();
+  _blockedOccByKey = blockedOcc;
+  const blockedKeys = Object.keys(blockedOcc).sort();
+  const stockConflicts = computeStockConflicts();
+  _conflictOccByKey = {};
+  for (const c of stockConflicts) _conflictOccByKey[c.key] = c.occurrences;
+
+  const statusTabsHtml = `<div class="status-tabs">
+    <button type="button" class="status-tab" onclick="scrollToCompleted()">✅ Intercambios hechos</button>
+    <button type="button" class="status-tab ${stockPanelMode === 'blocked' ? 'active' : ''}" onclick="toggleStockPanel('blocked')">⚠ Ya no disponibles${blockedKeys.length ? ` (${blockedKeys.length})` : ''}</button>
+    <button type="button" class="status-tab ${stockPanelMode === 'conflicts' ? 'active' : ''}" onclick="toggleStockPanel('conflicts')">🔴 Conflictos de Stock${stockConflicts.length ? ` (${stockConflicts.length})` : ''}</button>
+  </div>`;
+
+  let statusPanelHtml = '';
+  if (stockPanelMode === 'blocked') {
+    statusPanelHtml = `<div class="status-panel">
+      ${blockedKeys.length
+        ? `<ul>${blockedKeys.map(key => stockPanelItemHtml('blocked', key, blockedOcc[key], `ya no disponible — se usó en otro intercambio`)).join('')}</ul>`
+        : `<p class="status-panel-empty">No hay stickers bloqueados por falta de stock.</p>`}
+    </div>`;
+  } else if (stockPanelMode === 'conflicts') {
+    statusPanelHtml = `<div class="status-panel">
+      ${stockConflicts.length
+        ? `<ul>${stockConflicts.map(c => stockPanelItemHtml('conflicts', c.key, c.occurrences, `comprometido ${c.used} ${c.used === 1 ? 'vez' : 'veces'}, tenés ${c.total}`)).join('')}</ul>`
+        : `<p class="status-panel-empty">No hay conflictos de stock entre personas.</p>`}
+    </div>`;
+  }
 
   const sortBarHtml = `<div class="sort-bar">
     <span class="sort-label">Ordenar por:</span>
@@ -2425,7 +2537,7 @@ function renderTrades() {
     <div id="peopleList-completados" class="people-group">${completadosNames.map(renderPersonCard).join('')}</div>`;
   }
 
-  document.getElementById('page-trades').innerHTML = conflictBannerHtml + sortBarHtml + groupsHtml;
+  document.getElementById('page-trades').innerHTML = statusTabsHtml + statusPanelHtml + sortBarHtml + groupsHtml;
   document.getElementById('footerText').innerHTML = 'Marca un intercambio como hecho apenas lo confirmes en persona. Si el mismo sticker tuyo está comprometido en otro trato, ese trato se bloquea automáticamente. Cada lado tiene su propio menú para cambiar de sticker, y un cuadro para sumar stickers extra cuando uno vale más que el otro. Todo lo que edites en "Base de Datos" se refleja aquí al instante. Tu progreso se guarda solo.';
   initPeopleSortable();
   initRowSortables();
