@@ -275,6 +275,11 @@
     text-transform: uppercase; letter-spacing: 0.03em; color: var(--pitch-dark); background: var(--paper);
     display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
   }
+  .section-header.sticky-header {
+    position: sticky; top: var(--header-h); z-index: 18; cursor: pointer;
+    padding: 9px 16px; background: #fffdf7; box-shadow: 0 2px 3px rgba(0,0,0,0.04);
+  }
+  .section-header.sticky-header:hover { background: var(--gold-soft); }
   .explode-toggle {
     font-family: 'Barlow Condensed', sans-serif; font-size: 10.5px; font-weight: 700; text-transform: none;
     background: #fff; border: 1px solid var(--paper-line); color: var(--pitch); border-radius: 999px;
@@ -929,6 +934,10 @@ var pendingCompletePerson = null;
 // side = 'have' (lo que ella tiene) o 'give' (lo que yo tengo). Sólo de la
 // sesión actual, no se persiste.
 var expandedFiller = new Set();
+// Secciones grandes colapsadas por el usuario ("Intercambio programado" /
+// "Lista preliminar" de una persona) — clave `${personName}::${sectionKey}`,
+// no está en el set = expandida por defecto. Sólo de la sesión actual.
+var collapsedTradeSections = new Set();
 // Nombre de la persona cuyo Trato Especial se está editando ahora mismo
 // (formulario abierto) — null si ninguno. No se persiste.
 var editingSpecialFor = null;
@@ -1675,18 +1684,17 @@ function renderItemSection(personName, side, items, sectionLabel, isFiller) {
   return `<button type="button" class="filler-toggle" onclick="toggleFillerExpand('${escName}','${side}')">${expanded ? '▾' : '▸'} ${sectionLabel} (${items.length})</button>
     ${expanded ? `<div class="item-list">${items.map(it => renderItemRow(it, side, personName, 'select')).join('')}</div>` : ''}`;
 }
-// La lista del "Intercambio programado": sólo lo que se seleccionó de las
-// listas preliminares de abajo, con su propio checkbox de CONFIRMACIÓN —
-// éste es el que realmente descuenta stock cuando se marca.
-function renderProgrammedSection(personName) {
+// Contenido del "Intercambio programado" (sin encabezado propio — el
+// encabezado colapsable/fijo lo pone tradeSectionHeaderHtml): sólo lo que
+// se seleccionó en la lista preliminar, con su propio checkbox de
+// CONFIRMACIÓN — éste es el que realmente descuenta stock cuando se marca.
+function renderProgrammedItemsHtml(personName) {
   const haveSel = personSelectedHaveItems(personName);
   const giveSel = personSelectedGiveItems(personName);
-  let html = `<div class="section-header">📋 Intercambio programado — confirmá lo que realmente se entregó/recibió</div>`;
   if (!haveSel.length && !giveSel.length) {
-    html += `<p class="status-panel-empty" style="padding:0 16px 12px">Todavía no seleccionaste nada de las listas de abajo.</p>`;
-    return html;
+    return `<p class="status-panel-empty" style="padding:0 16px 12px">Todavía no seleccionaste nada de la lista preliminar.</p>`;
   }
-  html += `<div class="two-col-trade">
+  return `<div class="two-col-trade">
       <div class="trade-col">
         <div class="item-list">${haveSel.map(it => renderItemRow(it, 'have', personName, 'confirm')).join('') || '<p class="status-panel-empty">Nada de este lado todavía.</p>'}</div>
       </div>
@@ -1694,7 +1702,24 @@ function renderProgrammedSection(personName) {
         <div class="item-list">${giveSel.map(it => renderItemRow(it, 'give', personName, 'confirm')).join('') || '<p class="status-panel-empty">Nada de este lado todavía.</p>'}</div>
       </div>
     </div>`;
-  return html;
+}
+// Encabezado colapsable y FIJO (sticky, no se va con el scroll) para las
+// dos grandes secciones de una persona (Intercambio programado / Lista
+// preliminar) — un clic las contrae o expande.
+function tradeSectionHeaderHtml(personName, sectionKey, label) {
+  const isCollapsed = collapsedTradeSections.has(`${personName}::${sectionKey}`);
+  const escName = personName.replace(/'/g, "\\'");
+  return `<div class="section-header sticky-header" onclick="toggleTradeSection('${escName}','${sectionKey}')">
+      <span>${isCollapsed ? '▸' : '▾'} ${label}</span>
+    </div>`;
+}
+function isTradeSectionCollapsed(personName, sectionKey) {
+  return collapsedTradeSections.has(`${personName}::${sectionKey}`);
+}
+function toggleTradeSection(personName, sectionKey) {
+  const key = `${personName}::${sectionKey}`;
+  if (collapsedTradeSections.has(key)) collapsedTradeSections.delete(key); else collapsedTradeSections.add(key);
+  renderTrades();
 }
 // El Trato Especial sigue siendo el único caso 1x1 fijo — una sola fila con
 // ambos lados, sin selector de cambio (se define en Base de Datos).
@@ -1920,21 +1945,26 @@ function renderTrades() {
       }
       html += renderSpecialDealSection(special, name);
 
-      html += `<div class="section-header">🗂️ Lista preliminar — elegí qué sumar al intercambio</div>`;
-      html += `<div class="two-col-trade">
-        <div class="trade-col">
-          <h4 class="trade-col-title">📥 Recibís (tiene ${name.split(' ')[0]})</h4>
-          ${renderItemSection(name, 'have', haveItems.useful, '✅ Lo que sí me sirve', false)}
-          ${renderItemSection(name, 'have', haveItems.filler, '🟣 Lo que no me sirve', true)}
-        </div>
-        <div class="trade-col">
-          <h4 class="trade-col-title">📤 Doy (tengo yo)</h4>
-          ${renderItemSection(name, 'give', giveItems.useful, '✅ Lo que sí le sirve', false)}
-          ${renderItemSection(name, 'give', giveItems.filler, '🟣 Lo que no le sirve', true)}
-        </div>
-      </div>`;
+      html += tradeSectionHeaderHtml(name, 'programmed', '📋 Intercambio programado — confirmá lo que realmente se entregó/recibió');
+      if (!isTradeSectionCollapsed(name, 'programmed')) {
+        html += renderProgrammedItemsHtml(name);
+      }
 
-      html += renderProgrammedSection(name);
+      html += tradeSectionHeaderHtml(name, 'preliminary', '🗂️ Lista preliminar — elegí qué sumar al intercambio');
+      if (!isTradeSectionCollapsed(name, 'preliminary')) {
+        html += `<div class="two-col-trade">
+          <div class="trade-col">
+            <h4 class="trade-col-title">📥 Recibís (tiene ${name.split(' ')[0]})</h4>
+            ${renderItemSection(name, 'have', haveItems.useful, '✅ Lo que sí me sirve', false)}
+            ${renderItemSection(name, 'have', haveItems.filler, '🟣 Lo que no me sirve', true)}
+          </div>
+          <div class="trade-col">
+            <h4 class="trade-col-title">📤 Doy (tengo yo)</h4>
+            ${renderItemSection(name, 'give', giveItems.useful, '✅ Lo que sí le sirve', false)}
+            ${renderItemSection(name, 'give', giveItems.filler, '🟣 Lo que no le sirve', true)}
+          </div>
+        </div>`;
+      }
       html += `</div>`;
     }
     html += `</div>`;
