@@ -344,6 +344,9 @@
     display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); cursor: pointer;
   }
   .summary-modal-options input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--green-check); cursor: pointer; }
+  .summary-modal-order { text-align: left; margin-bottom: 20px; }
+  .summary-modal-order label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 5px; }
+  .summary-modal-order select { width: 100%; }
   .modal-btn-row { display: flex; gap: 10px; justify-content: center; }
   .modal-btn-cancel {
     font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px; text-transform: uppercase;
@@ -627,6 +630,13 @@
       <label><input type="checkbox" id="summaryOptTotal" checked /> Resumen de Inventario Total</label>
       <label><input type="checkbox" id="summaryOptFaltantes" /> Láminas Faltantes</label>
       <label><input type="checkbox" id="summaryOptIntercambio" /> Láminas para Intercambio</label>
+    </div>
+    <div class="summary-modal-order">
+      <label for="summaryOrderMode">Orden del detalle (Faltantes / Para Intercambio):</label>
+      <select class="db-filter-select" id="summaryOrderMode">
+        <option value="categoria">Por categoría (como en la app)</option>
+        <option value="alfabetico">Alfabético, sin categorías</option>
+      </select>
     </div>
     <div class="modal-btn-row">
       <button class="modal-btn" onclick="exportInventorySummarySelection()">Copiar resumen</button>
@@ -2601,6 +2611,12 @@ function tradeSectionDetailLines(rows, itemLineFn) {
   }
   return lines;
 }
+// Alternativa sin categorías: todo junto, ordenado alfabéticamente por
+// equipo y numérico por número de figurita.
+function flatDetailLines(rows, itemLineFn) {
+  const sorted = [...rows].sort((a, b) => compareCodeNum(a.code, a.num, b.code, b.num));
+  return sorted.map(itemLineFn);
+}
 function buildInventorySummaryTotalText() {
   const { pastedCount, tradeCopies, missingCount } = inventorySummaryCounts();
   return [
@@ -2610,17 +2626,21 @@ function buildInventorySummaryTotalText() {
     `Láminas que Necesito: ${missingCount}`,
   ].join('\n');
 }
-function buildInventoryFaltantesText() {
+// orderMode: 'categoria' (agrupado por sección, por defecto) o 'alfabetico'
+// (todo junto, sin encabezados de categoría).
+function buildInventoryFaltantesText(orderMode) {
   const { missingCount, trulyMissing } = inventorySummaryCounts();
   const lines = [`Láminas Faltantes: ${missingCount}`, ''];
-  lines.push(...tradeSectionDetailLines(trulyMissing, r => keyWithPlayerName(stickerDisplay(r.code, r.num))));
+  const itemLineFn = r => keyWithPlayerName(stickerDisplay(r.code, r.num));
+  lines.push(...(orderMode === 'alfabetico' ? flatDetailLines(trulyMissing, itemLineFn) : tradeSectionDetailLines(trulyMissing, itemLineFn)));
   return lines.join('\n').trim();
 }
-function buildInventoryTradeText() {
+function buildInventoryTradeText(orderMode) {
   const { tengoAll, tradeCopies } = inventorySummaryCounts();
   const available = tengoAll.filter(r => r.qty > 0);
   const lines = [`Láminas Para intercambio: ${tradeCopies}`, ''];
-  lines.push(...tradeSectionDetailLines(available, r => `${keyWithPlayerName(stickerDisplay(r.code, r.num))}${r.qty > 1 ? ` x${r.qty}` : ''}`));
+  const itemLineFn = r => `${keyWithPlayerName(stickerDisplay(r.code, r.num))}${r.qty > 1 ? ` x${r.qty}` : ''}`;
+  lines.push(...(orderMode === 'alfabetico' ? flatDetailLines(available, itemLineFn) : tradeSectionDetailLines(available, itemLineFn)));
   return lines.join('\n').trim();
 }
 function openInventorySummaryModal() {
@@ -2637,10 +2657,11 @@ function exportInventorySummarySelection() {
     alert('Elegí al menos una opción para el resumen.');
     return;
   }
+  const orderMode = document.getElementById('summaryOrderMode').value;
   const parts = [];
   if (wantTotal) parts.push(buildInventorySummaryTotalText());
-  if (wantFaltantes) parts.push(buildInventoryFaltantesText());
-  if (wantIntercambio) parts.push(buildInventoryTradeText());
+  if (wantFaltantes) parts.push(buildInventoryFaltantesText(orderMode));
+  if (wantIntercambio) parts.push(buildInventoryTradeText(orderMode));
   const text = parts.join('\n\n');
   closeInventorySummaryModal();
   if (navigator.clipboard && navigator.clipboard.writeText) {
