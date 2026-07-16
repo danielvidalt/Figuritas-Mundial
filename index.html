@@ -544,8 +544,16 @@
   .item-section-header {
     font-family: 'Barlow Condensed', sans-serif; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.03em; color: var(--muted); margin: 10px 0 4px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
   }
+  .select-all-row {
+    display: flex; align-items: center; gap: 5px; font-family: 'Barlow Condensed', sans-serif;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em;
+    color: var(--pitch); cursor: pointer; user-select: none; white-space: nowrap; margin-bottom: 4px;
+  }
+  .select-all-row input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--pitch); cursor: pointer; margin: 0; }
   .item-list { display: flex; flex-direction: column; }
+  .item-list .select-all-row { padding: 4px 2px 8px; border-bottom: 1px dashed var(--paper-line); }
   .item-row { display: grid; grid-template-columns: 18px 1fr; align-items: start; gap: 8px; padding: 6px 2px; border-bottom: 1px solid var(--paper-line); }
   .item-row:last-child { border-bottom: none; }
   .item-row.done .sticker-code { text-decoration: line-through; color: var(--muted); }
@@ -1019,6 +1027,16 @@ function toggleSelected(id) {
   saveTrackingState();
   renderAll();
 }
+// Versión en bloque de toggleSelected: marca o desmarca TODOS los ids de una
+// sola vez — para cuando está todo bien y no tiene sentido ir uno por uno.
+function toggleAllSelected(ids, on) {
+  for (const id of ids) {
+    if (on) selected.add(id);
+    else { selected.delete(id); checked.delete(id); }
+  }
+  saveTrackingState();
+  renderAll();
+}
 
 function computeSaleMatches(buyer) {
   const sale = state.sales.find(s => s.buyer === buyer);
@@ -1477,6 +1495,20 @@ function toggle(id) {
     }
   }
 }
+// Versión en bloque de toggle: confirma o desconfirma TODOS los ids de una
+// sola vez (ids ya filtrados de antemano para excluir lo bloqueado por falta
+// de stock, ver selectAllRowHtml) — para no tener que ir uno por uno cuando
+// ya se sabe que todo el trato se cumplió tal cual.
+function toggleAllChecked(personName, ids, on) {
+  for (const id of ids) {
+    if (on) checked.add(id); else checked.delete(id);
+  }
+  saveTrackingState();
+  renderAll();
+  if (on && state.people[personName] && isPersonComplete(personName)) {
+    showTradeCompleteModal(personName);
+  }
+}
 
 function showTradeCompleteModal(personName) {
   pendingCompletePerson = personName;
@@ -1862,6 +1894,34 @@ function toggleValueOverride(itemId) {
 // yo), cada una con lo útil arriba y lo demás (relleno) colapsado abajo.
 // Sólo el Trato Especial sigue siendo un 1x1 fijo.
 // ============================================================================
+// Checkbox "Marcar todo" para un grupo de ítems — evita ir uno por uno
+// cuando ya está todo bien y se quiere sumar/confirmar en bloque. En modo
+// 'confirm' del lado "doy" excluye del "encendido masivo" lo que esté
+// bloqueado por falta de stock (esas filas siguen deshabilitadas
+// individualmente y requieren revisión manual); en modo 'select' no hay
+// bloqueo posible. Sin efecto si hay 0 o 1 ítems.
+function selectAllRowHtml(mode, items, side, personName, label) {
+  if (items.length < 2) return '';
+  const set = mode === 'confirm' ? checked : selected;
+  const allIds = items.map(it => it.id);
+  const onIds = (mode === 'confirm' && side === 'give')
+    ? items.filter(it => {
+        if (checked.has(it.id)) return true;
+        const used = usedCountFor(it.key, it.id);
+        return stockRemainingText(it.key, used).remaining > 0;
+      }).map(it => it.id)
+    : allIds;
+  const allOn = allIds.every(id => set.has(id));
+  const fn = mode === 'confirm' ? 'toggleAllChecked' : 'toggleAllSelected';
+  const personArg = mode === 'confirm' ? `this.closest('.person-card').dataset.personName,` : '';
+  const dataAllIds = JSON.stringify(allIds).replace(/"/g, '&quot;');
+  const dataOnIds = JSON.stringify(onIds).replace(/"/g, '&quot;');
+  return `<label class="select-all-row">
+      <input type="checkbox" ${allOn ? 'checked' : ''} data-all-ids="${dataAllIds}" data-on-ids="${dataOnIds}"
+        onchange="${fn}(${personArg}JSON.parse(this.checked ? this.dataset.onIds : this.dataset.allIds), this.checked)" />
+      ${label}
+    </label>`;
+}
 // mode: 'select' (lista preliminar — el checkbox suma/saca del intercambio
 // programado, no toca stock) o 'confirm' (lista de intercambio programado —
 // el checkbox confirma que se entregó/recibió de verdad, y ESO es lo único
@@ -1910,14 +1970,14 @@ function renderItemRow(item, side, personName, mode) {
 function renderItemSection(personName, listId, side, items, sectionLabel, isFiller) {
   if (!items.length) return '';
   if (!isFiller) {
-    return `<div class="item-section-header">${sectionLabel} (${items.length})</div>
+    return `<div class="item-section-header"><span>${sectionLabel} (${items.length})</span>${selectAllRowHtml('select', items, side, personName, 'Marcar todo')}</div>
       <div class="item-list">${items.map(it => renderItemRow(it, side, personName, 'select')).join('')}</div>`;
   }
   const expanded = expandedFiller.has(`${personName}::${listId}::${side}`);
   const escName = personName.replace(/'/g, "\\'");
   const escList = listId.replace(/'/g, "\\'");
   return `<button type="button" class="filler-toggle" onclick="toggleFillerExpand('${escName}','${escList}','${side}')">${expanded ? '▾' : '▸'} ${sectionLabel} (${items.length})</button>
-    ${expanded ? `<div class="item-list">${items.map(it => renderItemRow(it, side, personName, 'select')).join('')}</div>` : ''}`;
+    ${expanded ? `<div class="item-list">${selectAllRowHtml('select', items, side, personName, 'Marcar todo')}${items.map(it => renderItemRow(it, side, personName, 'select')).join('')}</div>` : ''}`;
 }
 // Contenido del "Intercambio programado" (sin encabezado propio — el
 // encabezado colapsable/fijo lo pone tradeSectionHeaderHtml): sólo lo que
@@ -1931,9 +1991,11 @@ function renderProgrammedItemsHtml(personName, listId) {
   }
   return `<div class="two-col-trade">
       <div class="trade-col">
+        ${selectAllRowHtml('confirm', haveSel, 'have', personName, 'Marcar todo como recibido')}
         <div class="item-list">${haveSel.map(it => renderItemRow(it, 'have', personName, 'confirm')).join('') || '<p class="status-panel-empty">Nada de este lado todavía.</p>'}</div>
       </div>
       <div class="trade-col">
+        ${selectAllRowHtml('confirm', giveSel, 'give', personName, 'Marcar todo como entregado')}
         <div class="item-list">${giveSel.map(it => renderItemRow(it, 'give', personName, 'confirm')).join('') || '<p class="status-panel-empty">Nada de este lado todavía.</p>'}</div>
       </div>
     </div>`;
