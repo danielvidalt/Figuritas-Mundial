@@ -1763,11 +1763,13 @@ function navigateToTradeRow(mode, key, delta) {
     setTimeout(() => el.classList.remove('row-flash'), 1800);
   });
 }
-// Sale del modo de revisión: oculta el control flotante de navegación sin
-// tocar el panel de arriba (que sigue abierto si lo estaba).
+// Sale del modo de revisión: oculta el control flotante de navegación (sin
+// tocar el panel de arriba, que sigue abierto si lo estaba) y vuelve al
+// principio de la pantalla en vez de dejarte a mitad de la lista.
 function exitNavMode() {
   activeNav = null;
   renderNavFloater();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 // Control flotante y FIJO en pantalla (no se va al hacer scroll) con
 // "◀ N/M ▶" para seguir navegando entre las listas donde aparece el
